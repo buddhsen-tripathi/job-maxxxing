@@ -1,0 +1,31 @@
+{
+  "jobs": [
+    {
+      "id": 4001,
+      "title": "Backend Software Engineer",
+      "absolute_url": "https://boards.greenhouse.io/exampleco/jobs/4001?utm_source=newsletter",
+      "location": { "name": "New York, NY" },
+      "content": "<p>We are looking for a <b>Backend Software Engineer</b> with TypeScript and distributed systems experience.</p><ul><li>Build APIs</li><li>Own services in AWS</li></ul>",
+      "updated_at": "2026-07-28T14:00:00.000Z",
+      "metadata": []
+    },
+    {
+      "id": 4002,
+      "title": "Senior Full Stack Engineer",
+      "absolute_url": "https://boards.greenhouse.io/exampleco/jobs/4002",
+      "location": { "name": "Remote - US" },
+      "content": "<p>Join our platform team. React, Node.js, PostgreSQL.</p>",
+      "updated_at": "2026-07-29T09:30:00.000Z",
+      "metadata": []
+    },
+    {
+      "id": 4003,
+      "title": "Engineering Manager",
+      "absolute_url": "https://boards.greenhouse.io/exampleco/jobs/4003",
+      "location": { "name": "San Francisco, CA" },
+      "content": "<p>Lead a team of 8 engineers.</p>",
+      "updated_at": "2026-07-20T10:00:00.000Z",
+      "metadata": []
+    }
+  ]
+}

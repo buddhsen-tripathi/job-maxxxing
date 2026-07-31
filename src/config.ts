@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { type CandidateProfile, parseCandidateProfile } from "./candidate/profile";
 import type { Env } from "./env";
+import { type SourceEntry, SourcesConfigSchema } from "./sources/source-adapter";
 
 const SecretsSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
@@ -42,4 +44,31 @@ export function parseSecrets(env: Env): Secrets {
     throw new Error(`Missing or invalid secrets: ${missing}`);
   }
   return result.data;
+}
+
+function parseJsonEnv(raw: string | undefined, name: string): unknown | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`Environment variable ${name} is not valid JSON`);
+  }
+}
+
+export function parseSourcesConfig(env: Env): SourceEntry[] {
+  const raw = parseJsonEnv(env.SOURCES_JSON, "SOURCES_JSON");
+  if (raw === null) return [];
+  const result = SourcesConfigSchema.safeParse(raw);
+  if (!result.success) {
+    throw new Error(`Invalid SOURCES_JSON: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+export function parseCandidateProfileEnv(env: Env): CandidateProfile {
+  const raw = parseJsonEnv(env.CANDIDATE_PROFILE_JSON, "CANDIDATE_PROFILE_JSON");
+  if (raw === null) {
+    throw new Error("Missing CANDIDATE_PROFILE_JSON environment variable");
+  }
+  return parseCandidateProfile(raw);
 }

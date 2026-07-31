@@ -89,6 +89,36 @@ export async function listJobs(
   return result.results;
 }
 
+export async function getJobByCanonicalUrl(
+  db: D1Database,
+  canonicalUrl: string,
+): Promise<JobRow | null> {
+  return db
+    .prepare("SELECT * FROM jobs WHERE canonical_url = ?")
+    .bind(canonicalUrl)
+    .first<JobRow>();
+}
+
+export async function upsertDiscoveredJob(
+  db: D1Database,
+  input: InsertJobInput & { fingerprint: string },
+): Promise<{ job: JobRow; isNew: boolean }> {
+  const existing =
+    (await getJobByFingerprint(db, input.fingerprint)) ??
+    (input.canonicalUrl ? await getJobByCanonicalUrl(db, input.canonicalUrl) : null);
+  if (existing) {
+    await touchJobLastSeen(db, existing.id, input.now);
+    return { job: existing, isNew: false };
+  }
+  const job = await insertJob(db, input);
+  if (!job) {
+    const raced = await getJobByFingerprint(db, input.fingerprint);
+    if (raced) return { job: raced, isNew: false };
+    throw new Error(`Failed to insert job with fingerprint ${input.fingerprint}`);
+  }
+  return { job, isNew: true };
+}
+
 export async function touchJobLastSeen(db: D1Database, id: string, now?: Date): Promise<void> {
   await db.prepare("UPDATE jobs SET last_seen_at = ? WHERE id = ?").bind(nowIso(now), id).run();
 }

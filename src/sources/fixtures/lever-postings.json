@@ -1,0 +1,36 @@
+[
+  {
+    "id": "a1b2c3",
+    "text": "Software Engineer, Platform",
+    "hostedUrl": "https://jobs.lever.co/sampleinc/a1b2c3",
+    "applyUrl": "https://jobs.lever.co/sampleinc/a1b2c3/apply",
+    "descriptionPlain": "Build and scale our core platform services.\n\nRequirements: Go or TypeScript, Kubernetes, observability.",
+    "createdAt": 1785000000000,
+    "categories": {
+      "location": "Remote",
+      "commitment": "Full-Time",
+      "team": "Platform"
+    },
+    "workplaceType": "remote"
+  },
+  {
+    "id": "d4e5f6",
+    "text": "Frontend Engineer",
+    "hostedUrl": "https://jobs.lever.co/sampleinc/d4e5f6",
+    "description": "<p>Own our design system. React expertise required.</p>",
+    "createdAt": 1785100000000,
+    "categories": {
+      "location": "New York",
+      "commitment": "Full-Time",
+      "team": "Product"
+    },
+    "workplaceType": "hybrid"
+  },
+  {
+    "id": "g7h8i9",
+    "text": "Broken Posting",
+    "hostedUrl": "https://jobs.lever.co/sampleinc/g7h8i9",
+    "categories": {},
+    "workplaceType": "remote"
+  }
+]
