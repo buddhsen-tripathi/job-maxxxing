@@ -1,66 +1,118 @@
 # job-maxxing
 
 Personal job-search agent on Cloudflare Workers. Runs once per day, discovers
-software-engineering roles, deduplicates, scores against a verified candidate
-profile, and sends a Telegram digest. Human approval is required before any
-consequential action.
-
-## Status
-
-Milestones complete: 1 (bootstrap), 2 (data model). See PLAN.md for the roadmap.
+software-engineering roles from Greenhouse and Lever boards, deduplicates,
+scores against a verified candidate profile with an LLM, and sends a Telegram
+digest. Applications are prepared on demand but **never submitted** — every
+consequential action requires explicit human approval.
 
 ## Stack
 
-- Cloudflare Workers + Hono + TypeScript (strict)
+- Cloudflare Workers + Hono + TypeScript (strict), Bun
 - D1 (SQLite), Cron Trigger `0 13 * * *` (13:00 UTC = 9:00 AM New York EDT / 8:00 AM EST)
-- Vitest via `@cloudflare/vitest-pool-workers`, Biome, Bun, Wrangler
+- Telegram Bot API over fetch, provider-neutral LLM client (OpenAI-compatible)
+- Vitest via `@cloudflare/vitest-pool-workers`, Biome, Wrangler
 
-## Setup
+## Local setup
 
 ```sh
 bun install
-cp .dev.vars.example .dev.vars   # fill in secrets for local dev (never commit)
-```
-
-Secrets for production are set with Wrangler, e.g.:
-
-```sh
-bunx wrangler secret put TELEGRAM_BOT_TOKEN
+cp .dev.vars.example .dev.vars   # fill in values; never commit
+bunx wrangler d1 migrations apply job-maxxing --local
+bun run dev                      # http://localhost:8787
 ```
 
 ## Commands
 
 ```sh
-bun run dev     # start local worker (http://localhost:8787)
-bun run test    # run tests
-bun run typecheck # tsc --noEmit
-bun run lint    # biome check
-bun run lint:fix # biome check --write
+bun run dev        # local worker
+bun run test       # 108 tests (unit + integration + e2e smoke)
+bun run typecheck  # tsc --noEmit
+bun run lint       # biome check
+bun run deploy     # wrangler deploy
 ```
 
-## Endpoints
+## Configuration
 
-- `GET /health` — liveness + D1 connectivity check
+Secrets (set with `bunx wrangler secret put <NAME>` in production, `.dev.vars` locally):
 
-## Database
+| Name | Purpose |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | Random string; verified on every webhook call |
+| `TELEGRAM_ALLOWED_CHAT_ID` | Your personal chat ID (allowlist) |
+| `LLM_API_KEY` | OpenAI-compatible API key |
+| `LLM_MODEL` | Model name (e.g. `gpt-4o-mini`) |
+| `ADMIN_TOKEN` | Bearer token for `/api/admin/*` |
 
-Migrations live in `migrations/`. Apply them locally with:
+Non-secret JSON vars (can also be `.dev.vars` or wrangler `vars`):
+
+- `SOURCES_JSON` — discovery sources, e.g.
+  `[{"source":"greenhouse","company":"Acme","boardToken":"acme"},{"source":"lever","company":"Beta","account":"beta"}]`
+- `CANDIDATE_PROFILE_JSON` — validated candidate profile (see
+  `candidate-profile.example.json`; every generated claim traces to this data)
+
+## Production deployment (from a clean checkout)
 
 ```sh
-bunx wrangler d1 migrations apply job-maxxing --local
+bun install
+
+# 1. Create the database and copy the printed database_id into wrangler.jsonc
+bunx wrangler d1 create job-maxxing
+
+# 2. Apply migrations
+bunx wrangler d1 migrations apply job-maxxing --remote
+
+# 3. Set secrets
+for s in TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_ALLOWED_CHAT_ID \
+         LLM_API_KEY LLM_MODEL ADMIN_TOKEN SOURCES_JSON CANDIDATE_PROFILE_JSON; do
+  bunx wrangler secret put $s
+done
+
+# 4. Set APP_BASE_URL / ENVIRONMENT=production in wrangler.jsonc vars, then deploy
+bun run deploy
+
+# 5. Register the Telegram webhook
+TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... APP_BASE_URL=https://<worker>.workers.dev \
+  ./scripts/setup-telegram-webhook.sh
+
+# 6. Smoke check
+curl https://<worker>.workers.dev/health
+curl -X POST https://<worker>.workers.dev/api/admin/test-telegram \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -X POST https://<worker>.workers.dev/api/admin/run-daily \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"dryRun": true, "limit": 5}'
 ```
 
-Repositories live in `src/db/repositories/` (runs, jobs + scores + actions,
-applications). Tests apply migrations automatically via
-`@cloudflare/vitest-pool-workers`.
+The cron trigger then runs the search daily at 13:00 UTC with no manual
+intervention. A failed production run sends a safe Telegram error notice.
 
-Candidate data is validated by Zod schemas in `src/candidate/`. Copy
-`candidate-profile.example.json` and `search-preferences.example.json` to
-create real local data (never commit real profiles).
+## Operations
+
+- **Manual run**: `POST /api/admin/run-daily` (`{"dryRun": false}`). Only one
+  non-dry run executes per UTC date (run lock).
+- **Cost/usage limits**: scoring only runs on new, filter-eligible jobs; use
+  `limit` in dry runs; LLM concurrency is capped at 2; source concurrency at 3.
+- **Backup/export**: `bunx wrangler d1 export job-maxxing --remote --output backup.sql`
+- **Recovery**: restore with `bunx wrangler d1 execute job-maxxing --remote --file backup.sql`.
+  Re-running a day is safe — discovery and digests are idempotent; to force a
+  re-run, delete that date's row in `run_locks`.
+- **Rollback**: `bunx wrangler rollback` (or redeploy a previous git commit).
+- **Logs**: `bunx wrangler tail` — structured JSON with runId/jobId/source,
+  never tokens or personal data.
+
+## API
+
+- `GET /health`
+- `POST /telegram/webhook` (Telegram only; secret header + chat allowlist)
+- `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/shortlist|skip|prepare`
+- `GET /api/runs`, `GET /api/runs/:id`
+- `POST /api/admin/run-daily` (bearer auth, supports `dryRun`, `sourceNames`, `limit`)
+- `POST /api/admin/test-telegram` (bearer auth)
 
 ## Notes
 
-- `wrangler.jsonc` contains a placeholder D1 `database_id`; replace with the real
-  ID after `bunx wrangler d1 create job-maxxing`.
-- Secrets are optional at the type level in Milestone 1; `parseSecrets` in
-  `src/config.ts` validates them with readable errors when a feature needs them.
+- The MVP never submits applications. Preparation distinguishes verified,
+  derived, and unknown answers; demographic questions stay unanswered.
+- See PLAN.md for the full implementation plan and milestone history.

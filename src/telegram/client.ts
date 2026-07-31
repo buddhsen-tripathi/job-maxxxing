@@ -1,5 +1,6 @@
 import { AppError } from "../shared/errors";
 import { fetchWithTimeout } from "../shared/http";
+import { withRetry } from "../shared/retry";
 
 export interface InlineButton {
   text: string;
@@ -42,11 +43,18 @@ export function createTelegramClient(options: {
   const baseUrl = `https://api.telegram.org/bot${options.token}`;
 
   async function call(method: string, payload: Record<string, unknown>): Promise<unknown> {
-    const response = await fetchWithTimeout(fetchImpl, `${baseUrl}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const response = await withRetry(
+      () =>
+        fetchWithTimeout(fetchImpl, `${baseUrl}/${method}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+      {
+        retries: 1,
+        shouldRetry: (error) => error instanceof AppError && error.code === "fetch_timeout",
+      },
+    );
     if (!response.ok) {
       throw new AppError(
         "telegram_api_error",
