@@ -1,0 +1,89 @@
+{
+  "identity": {
+    "fullName": "Alex Example",
+    "email": "alex@example.com",
+    "phone": "+1-555-0100",
+    "location": "New York, NY",
+    "links": {
+      "website": "https://alex-example.dev",
+      "github": "https://github.com/alex-example",
+      "linkedin": "https://www.linkedin.com/in/alex-example"
+    }
+  },
+  "authorization": {
+    "country": "United States",
+    "authorizedToWork": true,
+    "requiresSponsorshipNow": false,
+    "requiresSponsorshipFuture": false,
+    "explanation": "US citizen."
+  },
+  "experience": {
+    "totalYears": 6,
+    "currentTitle": "Senior Software Engineer",
+    "skills": ["TypeScript", "Node.js", "React", "PostgreSQL", "AWS", "Distributed Systems"],
+    "domains": ["fintech", "developer-tools"],
+    "evidence": [
+      {
+        "id": "ev-api-platform",
+        "claim": "Designed and shipped a public REST API platform serving 50M requests/day.",
+        "source": "resume:Example Corp (2021-present)"
+      },
+      {
+        "id": "ev-typescript-6y",
+        "claim": "Six years of production TypeScript across backend and frontend codebases.",
+        "source": "resume:Example Corp, Sample Inc"
+      },
+      {
+        "id": "ev-payments",
+        "claim": "Built payment reconciliation pipelines processing $2B annually.",
+        "source": "resume:Example Corp"
+      }
+    ]
+  },
+  "education": [
+    {
+      "institution": "Example State University",
+      "degree": "B.S.",
+      "field": "Computer Science",
+      "graduationDate": "2018-05"
+    }
+  ],
+  "preferences": {
+    "titles": [
+      "Software Engineer",
+      "Senior Software Engineer",
+      "Backend Engineer",
+      "Full Stack Engineer"
+    ],
+    "excludedTitles": ["Engineering Manager", "Recruiter", "Sales Engineer"],
+    "locations": ["New York, NY", "Remote - US"],
+    "remote": true,
+    "hybrid": true,
+    "onsite": false,
+    "employmentTypes": ["full_time"],
+    "minimumSalary": 150000,
+    "excludedCompanies": ["Example Spammy Staffing LLC"],
+    "requiredKeywords": [],
+    "excludedKeywords": ["clearance", "unpaid"]
+  },
+  "answers": {
+    "work_authorization": {
+      "value": "I am authorized to work in the United States for any employer.",
+      "evidenceIds": [],
+      "sensitive": true,
+      "requiresApproval": true
+    },
+    "sponsorship": {
+      "value": "I do not require sponsorship now or in the future.",
+      "evidenceIds": [],
+      "sensitive": true,
+      "requiresApproval": true
+    },
+    "years_experience_typescript": {
+      "value": "6 years of production TypeScript experience.",
+      "evidenceIds": ["ev-typescript-6y"],
+      "sensitive": false,
+      "requiresApproval": false
+    }
+  }
+}
