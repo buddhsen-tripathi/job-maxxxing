@@ -46,6 +46,27 @@ export function parseSecrets(env: Env): Secrets {
   return result.data;
 }
 
+const TelegramSecretsSchema = z.object({
+  TELEGRAM_BOT_TOKEN: z.string().min(1),
+  TELEGRAM_WEBHOOK_SECRET: z.string().min(1),
+  TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1),
+});
+
+export type TelegramSecrets = z.infer<typeof TelegramSecretsSchema>;
+
+export function parseTelegramSecrets(env: Env): TelegramSecrets {
+  const result = TelegramSecretsSchema.safeParse({
+    TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET: env.TELEGRAM_WEBHOOK_SECRET,
+    TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID,
+  });
+  if (!result.success) {
+    const missing = result.error.issues.map((i) => i.path.join(".")).join(", ");
+    throw new Error(`Missing or invalid Telegram secrets: ${missing}`);
+  }
+  return result.data;
+}
+
 function parseJsonEnv(raw: string | undefined, name: string): unknown | null {
   if (!raw) return null;
   try {
