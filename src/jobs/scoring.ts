@@ -1,4 +1,5 @@
 import type { CandidateProfile } from "../candidate/profile";
+import { getJobById, getLatestScoreForJob } from "../db/repositories/jobs";
 import type { JobRow } from "../db/schema";
 import type { LlmClient } from "../llm/client";
 import { SCORING_PROMPT_VERSION } from "../llm/prompts";
@@ -109,6 +110,28 @@ export async function scoreJobs(
   return {
     scored: results.flatMap((r) => (r.scored ? [r.scored] : [])),
     failures: results.flatMap((r) => (r.failure ? [r.failure] : [])),
+  };
+}
+
+export async function getScoredJob(db: D1Database, jobId: string): Promise<ScoredJob | null> {
+  const job = await getJobById(db, jobId);
+  if (!job) return null;
+  const row = await getLatestScoreForJob(db, jobId);
+  if (!row) return null;
+  return {
+    job,
+    score: {
+      technicalScore: row.technical_score,
+      experienceScore: row.experience_score,
+      domainScore: row.domain_score,
+      locationScore: row.location_score,
+      evidenceScore: row.evidence_score,
+      totalScore: row.total_score,
+      recommendation: row.recommendation,
+      reasons: JSON.parse(row.reasons_json) as string[],
+      risks: JSON.parse(row.risks_json) as string[],
+      evidence: JSON.parse(row.evidence_json) as JobScore["evidence"],
+    },
   };
 }
 

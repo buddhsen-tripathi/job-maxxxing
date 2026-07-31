@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { z } from "zod";
+import { parseTelegramSecrets, type TelegramSecrets } from "../config";
 import type { Env } from "../env";
+import { createTelegramClient } from "../telegram/client";
 import { runDailyJobSearch } from "../workflows/daily-job-search";
 
 export const adminAuth = createMiddleware<{ Bindings: Env }>(async (c, next) => {
@@ -36,4 +38,18 @@ export const admin = new Hono<{ Bindings: Env }>()
       ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
     });
     return c.json({ summary }, summary.status === "failed" ? 500 : 200);
+  })
+  .post("/test-telegram", async (c) => {
+    let secrets: TelegramSecrets;
+    try {
+      secrets = parseTelegramSecrets(c.env);
+    } catch {
+      return c.json({ error: "telegram_not_configured" }, 503);
+    }
+    const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
+    const message = await client.sendMessage({
+      chatId: secrets.TELEGRAM_ALLOWED_CHAT_ID,
+      text: "job-maxxing test message — Telegram is configured correctly.",
+    });
+    return c.json({ ok: true, messageId: message.messageId });
   });

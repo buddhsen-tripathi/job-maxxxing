@@ -1,4 +1,10 @@
-import { parseCandidateProfileEnv, parseSecrets, parseSourcesConfig, parseVars } from "../config";
+import {
+  parseCandidateProfileEnv,
+  parseSecrets,
+  parseSourcesConfig,
+  parseTelegramSecrets,
+  parseVars,
+} from "../config";
 import { getApplicationByJobId } from "../db/repositories/applications";
 import {
   getJobByFingerprint,
@@ -21,6 +27,8 @@ import { createOpenAiLlmClient } from "../llm/openai";
 import { errorMessage } from "../shared/errors";
 import { createLogger, type Logger } from "../shared/logger";
 import { utcDateKey } from "../shared/time";
+import { createTelegramClient } from "../telegram/client";
+import { createTelegramNotifier } from "../telegram/notifier";
 
 export interface DigestInput {
   runId: string;
@@ -110,6 +118,29 @@ function resolveLlmClient(env: Env, override: LlmClient | undefined, logger: Log
   }
 }
 
+function resolveNotifier(
+  env: Env,
+  override: DigestNotifier | undefined,
+  logger: Logger,
+): DigestNotifier {
+  if (override) return override;
+  try {
+    const secrets = parseTelegramSecrets(env);
+    return createTelegramNotifier({
+      client: createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN }),
+      chatId: secrets.TELEGRAM_ALLOWED_CHAT_ID,
+      db: env.DB,
+    });
+  } catch {
+    logger.warn({
+      operation: "daily_job_search",
+      status: "notifier_fallback",
+      message: "Telegram secrets missing; digest will be logged instead.",
+    });
+    return createConsoleNotifier(logger);
+  }
+}
+
 export async function runDailyJobSearch(
   env: Env,
   options: DailyRunOptions = {},
@@ -117,7 +148,7 @@ export async function runDailyJobSearch(
   const now = options.now ?? new Date();
   const dryRun = options.dryRun ?? false;
   const logger = createLogger({ operation: "daily_job_search" });
-  const notifier = options.notifier ?? createConsoleNotifier(logger);
+  const notifier = resolveNotifier(env, options.notifier, logger);
 
   const emptySummary: RunSummary = {
     runId: null,
