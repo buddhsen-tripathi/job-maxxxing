@@ -3,7 +3,12 @@ import type { AuditEventRow, BlockedCompanyRow } from "../schema";
 
 export async function blockCompany(
   db: D1Database,
-  input: { normalizedCompany: string; displayName: string; reason?: string | null; now?: Date },
+  input: {
+    normalizedCompany: string;
+    displayName: string;
+    reason?: string | null;
+    now?: Date | undefined;
+  },
 ): Promise<void> {
   await db
     .prepare(
@@ -31,7 +36,7 @@ export async function insertAuditEvent(
     entityId: string;
     eventType: string;
     payload?: unknown;
-    now?: Date;
+    now?: Date | undefined;
   },
 ): Promise<AuditEventRow | null> {
   const id = newId();

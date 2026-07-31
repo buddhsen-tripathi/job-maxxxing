@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { parseTelegramSecrets, type TelegramSecrets } from "../config";
+import {
+  parseCandidateProfileEnv,
+  parseSecrets,
+  parseTelegramSecrets,
+  type TelegramSecrets,
+} from "../config";
 import type { Env } from "../env";
+import { createOpenAiLlmClient } from "../llm/openai";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
 import { isAllowedChat, verifyTelegramSecret } from "../telegram/security";
@@ -54,7 +60,23 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
 
   if (update.callback_query) {
     const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
-    await handleCallbackQuery(c.env.DB, client, update.callback_query);
+    let profile: ReturnType<typeof parseCandidateProfileEnv> | undefined;
+    try {
+      profile = parseCandidateProfileEnv(c.env);
+    } catch {
+      profile = undefined;
+    }
+    let llm: ReturnType<typeof createOpenAiLlmClient> | undefined;
+    try {
+      const llmSecrets = parseSecrets(c.env);
+      llm = createOpenAiLlmClient({ apiKey: llmSecrets.LLM_API_KEY, model: llmSecrets.LLM_MODEL });
+    } catch {
+      llm = undefined;
+    }
+    await handleCallbackQuery(c.env.DB, client, update.callback_query, {
+      ...(profile ? { profile } : {}),
+      ...(llm ? { llm } : {}),
+    });
     return c.json({ ok: true });
   }
 

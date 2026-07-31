@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { prepareApplication } from "../applications/prepare";
+import { parseCandidateProfileEnv } from "../config";
 import {
   getJobById,
   getLatestScoreForJob,
@@ -10,6 +12,7 @@ import {
 import { insertAuditEvent } from "../db/repositories/meta";
 import type { JobStatus } from "../db/schema";
 import type { Env } from "../env";
+import { errorMessage } from "../shared/errors";
 
 const JobStatusSchema = z.enum([
   "discovered",
@@ -65,8 +68,14 @@ export const jobs = new Hono<{ Bindings: Env }>()
   .post("/:id/prepare", async (c) => {
     const job = await getJobById(c.env.DB, c.req.param("id"));
     if (!job) return c.json({ error: "not_found" }, 404);
-    return c.json(
-      { error: "not_implemented", message: "Application preparation ships in Milestone 7." },
-      501,
-    );
+    try {
+      const prepared = await prepareApplication(c.env.DB, {
+        jobId: job.id,
+        profile: parseCandidateProfileEnv(c.env),
+      });
+      return c.json({ prepared });
+    } catch (error) {
+      const message = errorMessage(error);
+      return c.json({ error: "preparation_failed", message }, 400);
+    }
   });
