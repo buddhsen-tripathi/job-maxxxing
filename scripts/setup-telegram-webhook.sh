@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Registers the Telegram webhook for this deployment.
+# Required env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, APP_BASE_URL
+set -euo pipefail
+
+: "${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN}"
+: "${TELEGRAM_WEBHOOK_SECRET:?Set TELEGRAM_WEBHOOK_SECRET}"
+: "${APP_BASE_URL:?Set APP_BASE_URL (e.g. https://job-maxxing.<account>.workers.dev)}"
+
+curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"url\": \"${APP_BASE_URL%/}/telegram/webhook\",
+    \"secret_token\": \"${TELEGRAM_WEBHOOK_SECRET}\",
+    \"allowed_updates\": [\"callback_query\"],
+    \"drop_pending_updates\": true
+  }"
+
+echo
+echo "Webhook registered for ${APP_BASE_URL%/}/telegram/webhook"

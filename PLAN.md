@@ -160,19 +160,19 @@ bypass; rate limits respected.
 
 1. **Bootstrap** — Worker, Hono, TS strict, Wrangler, D1 binding, /health,
    Biome, Vitest, env validation. ✅ Done.
-2. **Data Model** — migrations, repositories, profile/prefs schemas, seeds.
+2. **Data Model** — migrations, repositories, profile/prefs schemas, seeds. ✅ Done.
 3. **Discovery** — adapter interface, Greenhouse, Lever, fixtures,
-   normalization, fingerprinting, dedup.
+   normalization, fingerprinting, dedup. ✅ Done.
 4. **Filtering & Scoring** — filter engine, LLM interface + mock + provider,
-   structured scoring, evidence verification, thresholds.
+   structured scoring, evidence verification, thresholds. ✅ Done.
 5. **Daily Run** — scheduled handler, run locking, orchestration, partial
-   failure, summaries, dry-run endpoint.
+   failure, summaries, dry-run endpoint. ✅ Done.
 6. **Telegram** — client, secure webhook, digest, inline actions, review/
-   shortlist flow, block confirmation, error notifications.
+   shortlist flow, block confirmation, error notifications. ✅ Done.
 7. **Application Preparation** — state machine, resume variants, draft
-   answers, evidence links, unknown handling, Telegram review.
+   answers, evidence links, unknown handling, Telegram review. ✅ Done.
 8. **Production Hardening** — deploy guide, secrets, webhook setup script,
-   prod migrations, logging, retries, cost limits, backup/rollback docs.
+   prod migrations, logging, retries, cost limits, backup/rollback docs. ✅ Done.
 
 Do not begin a later milestone until the current milestone's acceptance
 criteria pass.
