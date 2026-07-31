@@ -1,0 +1,25 @@
+{
+  // Cron: 13:00 UTC daily = 9:00 AM New York (EDT) / 8:00 AM (EST).
+  "name": "job-maxxing",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-07-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["0 13 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "job-maxxing",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "APP_BASE_URL": "http://localhost:8787"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
