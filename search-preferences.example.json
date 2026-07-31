@@ -1,0 +1,18 @@
+{
+  "titles": [
+    "Software Engineer",
+    "Senior Software Engineer",
+    "Backend Engineer",
+    "Full Stack Engineer"
+  ],
+  "excludedTitles": ["Engineering Manager", "Recruiter", "Sales Engineer"],
+  "locations": ["New York, NY", "Remote - US"],
+  "remote": true,
+  "hybrid": true,
+  "onsite": false,
+  "employmentTypes": ["full_time"],
+  "minimumSalary": 150000,
+  "excludedCompanies": ["Example Spammy Staffing LLC"],
+  "requiredKeywords": [],
+  "excludedKeywords": ["clearance", "unpaid"]
+}

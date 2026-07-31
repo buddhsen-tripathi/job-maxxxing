@@ -1,6 +1,8 @@
+import type { applyD1Migrations } from "cloudflare:test";
 import type { Env } from "../src/env";
 
 declare module "cloudflare:test" {
-  // eslint-disable-next-line @typescript-eslint/no-empty-interface
-  interface ProvidedEnv extends Env {}
+  interface ProvidedEnv extends Env {
+    TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
+  }
 }

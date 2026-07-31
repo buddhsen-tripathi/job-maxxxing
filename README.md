@@ -7,7 +7,7 @@ consequential action.
 
 ## Status
 
-Milestone 1 (project bootstrap) complete. See PLAN.md for the roadmap.
+Milestones complete: 1 (bootstrap), 2 (data model). See PLAN.md for the roadmap.
 
 ## Stack
 
@@ -41,6 +41,22 @@ bun run lint:fix # biome check --write
 ## Endpoints
 
 - `GET /health` — liveness + D1 connectivity check
+
+## Database
+
+Migrations live in `migrations/`. Apply them locally with:
+
+```sh
+bunx wrangler d1 migrations apply job-maxxing --local
+```
+
+Repositories live in `src/db/repositories/` (runs, jobs + scores + actions,
+applications). Tests apply migrations automatically via
+`@cloudflare/vitest-pool-workers`.
+
+Candidate data is validated by Zod schemas in `src/candidate/`. Copy
+`candidate-profile.example.json` and `search-preferences.example.json` to
+create real local data (never commit real profiles).
 
 ## Notes
 
