@@ -11,4 +11,8 @@ export interface Env {
 
   APP_BASE_URL: string;
   ENVIRONMENT: "development" | "production";
+
+  ADMIN_TOKEN?: string;
+  SOURCES_JSON?: string;
+  CANDIDATE_PROFILE_JSON?: string;
 }
