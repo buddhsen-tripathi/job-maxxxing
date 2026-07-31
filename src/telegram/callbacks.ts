@@ -1,3 +1,6 @@
+import { prepareApplication } from "../applications/prepare";
+import type { CandidateProfile } from "../candidate/profile";
+import { getApplicationByJobId } from "../db/repositories/applications";
 import {
   getJobById,
   insertJobAction,
@@ -7,11 +10,18 @@ import {
 import { blockCompany, insertAuditEvent } from "../db/repositories/meta";
 import { normalizeCompany } from "../jobs/fingerprint";
 import { getScoredJob } from "../jobs/scoring";
+import type { LlmClient } from "../llm/client";
+import { errorMessage } from "../shared/errors";
 import type { TelegramClient } from "./client";
-import { renderBlockConfirmation, renderReviewCard } from "./digest";
+import {
+  renderAnswersReview,
+  renderBlockConfirmation,
+  renderPreparationSummary,
+  renderReviewCard,
+} from "./digest";
 
 const CALLBACK_PATTERN =
-  /^job:(review|shortlist|skip|block|blockconfirm|back|prepare):([0-9a-f-]{36})$/;
+  /^job:(review|shortlist|skip|block|blockconfirm|back|prepare|answers):([0-9a-f-]{36})$/;
 
 export type CallbackActionType =
   | "review"
@@ -20,7 +30,8 @@ export type CallbackActionType =
   | "block"
   | "blockconfirm"
   | "back"
-  | "prepare";
+  | "prepare"
+  | "answers";
 
 export interface CallbackAction {
   type: CallbackActionType;
@@ -45,10 +56,16 @@ async function hasAction(db: D1Database, jobId: string, action: string): Promise
   return actions.some((entry) => entry.source === "telegram");
 }
 
+export interface CallbackDeps {
+  profile?: CandidateProfile;
+  llm?: LlmClient;
+}
+
 export async function handleCallbackQuery(
   db: D1Database,
   client: TelegramClient,
   query: CallbackQuery,
+  deps: CallbackDeps = {},
 ): Promise<void> {
   const chatId = query.message?.chat.id;
   const messageId = query.message?.message_id;
@@ -164,10 +181,57 @@ export async function handleCallbackQuery(
     }
 
     case "prepare": {
-      await client.answerCallbackQuery(
-        query.id,
-        "Application preparation is not available yet (Milestone 7).",
-      );
+      if (!deps.profile) {
+        await client.answerCallbackQuery(
+          query.id,
+          "Preparation unavailable: no candidate profile.",
+        );
+        return;
+      }
+      try {
+        const prepared = await prepareApplication(db, {
+          jobId: job.id,
+          profile: deps.profile,
+          ...(deps.llm ? { llm: deps.llm } : {}),
+        });
+        const summary = renderPreparationSummary({
+          jobTitle: job.title,
+          company: job.company,
+          jobId: job.id,
+          applyUrl: job.apply_url,
+          resumeVariant: prepared.resumeVariant,
+          verifiedCount: prepared.answers.filter((a) => a.confidence === "verified").length,
+          reviewCount: prepared.answers.filter((a) => a.answer && a.requiresApproval).length,
+          unknownCount: prepared.unresolvedQuestions.length,
+        });
+        await client.sendMessage({
+          chatId: String(chatId),
+          text: summary.text,
+          buttons: summary.buttons,
+        });
+        await client.answerCallbackQuery(query.id, "Application prepared.");
+      } catch (error) {
+        await client.answerCallbackQuery(query.id, `Preparation failed: ${errorMessage(error)}`);
+      }
+      return;
+    }
+
+    case "answers": {
+      const application = await getApplicationByJobId(db, job.id);
+      if (!application?.prepared_answers_json) {
+        await client.answerCallbackQuery(query.id, "No prepared application for this job.");
+        return;
+      }
+      const answers = JSON.parse(application.prepared_answers_json) as Parameters<
+        typeof renderAnswersReview
+      >[0]["answers"];
+      const review = renderAnswersReview({ jobId: job.id, answers });
+      await client.sendMessage({
+        chatId: String(chatId),
+        text: review.text,
+        buttons: review.buttons,
+      });
+      await client.answerCallbackQuery(query.id);
       return;
     }
   }

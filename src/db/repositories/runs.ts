@@ -10,7 +10,7 @@ export interface RunCounts {
 
 export async function createRun(
   db: D1Database,
-  input: { triggerType: string; now?: Date },
+  input: { triggerType: string; now?: Date | undefined },
 ): Promise<RunRow> {
   const id = newId();
   const startedAt = nowIso(input.now);
@@ -42,7 +42,7 @@ export async function completeRun(
   db: D1Database,
   id: string,
   counts: RunCounts,
-  now?: Date,
+  now?: Date | undefined,
 ): Promise<void> {
   await db
     .prepare(
@@ -66,7 +66,7 @@ export async function failRun(
   db: D1Database,
   id: string,
   error: string,
-  now?: Date,
+  now?: Date | undefined,
 ): Promise<void> {
   await db
     .prepare("UPDATE runs SET status = 'failed', completed_at = ?, error = ? WHERE id = ?")

@@ -3,7 +3,7 @@ import type { ApplicationRow, ApplicationStatus } from "../schema";
 
 export async function createApplication(
   db: D1Database,
-  input: { jobId: string; now?: Date },
+  input: { jobId: string; now?: Date | undefined },
 ): Promise<ApplicationRow | null> {
   const id = newId();
   const now = nowIso(input.now);
@@ -67,7 +67,7 @@ export async function updateApplication(
     submittedAt?: string | null;
     submissionReference?: string | null;
   },
-  now?: Date,
+  now?: Date | undefined,
 ): Promise<void> {
   const columns: Record<string, string | null | undefined> = {
     status: patch.status,

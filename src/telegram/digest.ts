@@ -107,6 +107,7 @@ export function renderReviewCard(scored: ScoredJob): {
   }
   lines.push(escapeHtml(job.apply_url));
   const buttons: InlineButton[][] = [
+    [{ text: "Prepare application", callbackData: `job:prepare:${job.id}` }],
     [
       { text: "Shortlist", callbackData: `job:shortlist:${job.id}` },
       { text: "Skip", callbackData: `job:skip:${job.id}` },
@@ -117,6 +118,62 @@ export function renderReviewCard(scored: ScoredJob): {
     ],
   ];
   return { text: lines.join("\n"), buttons };
+}
+
+export function renderPreparationSummary(prepared: {
+  jobTitle: string;
+  company: string;
+  jobId: string;
+  applyUrl: string;
+  resumeVariant: string;
+  verifiedCount: number;
+  reviewCount: number;
+  unknownCount: number;
+}): { text: string; buttons: InlineButton[][] } {
+  const text = [
+    `<b>Application prepared</b> — ${escapeHtml(prepared.jobTitle)} @ ${escapeHtml(prepared.company)}`,
+    "",
+    `Verified answers: ${prepared.verifiedCount}`,
+    `Needs review: ${prepared.reviewCount}`,
+    `Unanswered: ${prepared.unknownCount}`,
+    `Resume variant: ${prepared.resumeVariant}`,
+  ].join("\n");
+  return {
+    text,
+    buttons: [
+      [{ text: "Review answers", callbackData: `job:answers:${prepared.jobId}` }],
+      [{ text: "Open application", url: prepared.applyUrl }],
+      [{ text: "Cancel", callbackData: `job:back:${prepared.jobId}` }],
+    ],
+  };
+}
+
+export function renderAnswersReview(prepared: {
+  jobId: string;
+  answers: Array<{
+    question: string;
+    answer?: string;
+    confidence: "verified" | "derived" | "unknown";
+    requiresApproval: boolean;
+  }>;
+}): { text: string; buttons: InlineButton[][] } {
+  const lines = ["<b>Prepared answers</b>", ""];
+  for (const answer of prepared.answers) {
+    const label =
+      answer.confidence === "verified"
+        ? "verified"
+        : answer.confidence === "derived"
+          ? "derived — review before use"
+          : "unanswered";
+    lines.push(`<b>${escapeHtml(answer.question)}</b>`);
+    lines.push(`${label}${answer.requiresApproval ? " (approval required)" : ""}`);
+    if (answer.answer) lines.push(escapeHtml(answer.answer));
+    lines.push("");
+  }
+  return {
+    text: lines.join("\n").slice(0, 4000),
+    buttons: [[{ text: "Back", callbackData: `job:back:${prepared.jobId}` }]],
+  };
 }
 
 export function renderBlockConfirmation(

@@ -18,7 +18,7 @@ export interface InsertJobInput {
   salaryCurrency?: string | null;
   postedAt?: string | null;
   rawPayload?: string | null;
-  now?: Date;
+  now?: Date | undefined;
 }
 
 export async function insertJob(db: D1Database, input: InsertJobInput): Promise<JobRow | null> {
@@ -119,7 +119,11 @@ export async function upsertDiscoveredJob(
   return { job, isNew: true };
 }
 
-export async function touchJobLastSeen(db: D1Database, id: string, now?: Date): Promise<void> {
+export async function touchJobLastSeen(
+  db: D1Database,
+  id: string,
+  now?: Date | undefined,
+): Promise<void> {
   await db.prepare("UPDATE jobs SET last_seen_at = ? WHERE id = ?").bind(nowIso(now), id).run();
 }
 
@@ -140,7 +144,7 @@ export interface InsertScoreInput {
   reasonsJson: string;
   risksJson: string;
   evidenceJson: string;
-  now?: Date;
+  now?: Date | undefined;
 }
 
 export async function insertJobScore(
@@ -193,7 +197,7 @@ export async function insertJobAction(
     action: string;
     source: string;
     metadataJson?: string | null;
-    now?: Date;
+    now?: Date | undefined;
   },
 ): Promise<JobActionRow | null> {
   const id = newId();
