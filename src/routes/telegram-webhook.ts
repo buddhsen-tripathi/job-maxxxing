@@ -1,13 +1,14 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
-  parseCandidateProfileEnv,
+  loadCandidateProfile,
   parseSecrets,
   parseTelegramSecrets,
   type TelegramSecrets,
 } from "../config";
+import type { CandidateProfile } from "../candidate/profile";
 import type { Env } from "../env";
-import { createOpenAiLlmClient } from "../llm/openai";
+import { createOpenRouterLlmClient } from "../llm/openrouter";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
 import { isAllowedChat, verifyTelegramSecret } from "../telegram/security";
@@ -60,16 +61,21 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
 
   if (update.callback_query) {
     const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
-    let profile: ReturnType<typeof parseCandidateProfileEnv> | undefined;
+    let profile: CandidateProfile | undefined;
     try {
-      profile = parseCandidateProfileEnv(c.env);
+      profile = await loadCandidateProfile(c.env);
     } catch {
       profile = undefined;
     }
-    let llm: ReturnType<typeof createOpenAiLlmClient> | undefined;
+    let llm: ReturnType<typeof createOpenRouterLlmClient> | undefined;
     try {
       const llmSecrets = parseSecrets(c.env);
-      llm = createOpenAiLlmClient({ apiKey: llmSecrets.LLM_API_KEY, model: llmSecrets.LLM_MODEL });
+      llm = createOpenRouterLlmClient({
+        apiKey: llmSecrets.OPENROUTER_API_KEY,
+        model: llmSecrets.OPENROUTER_MODEL,
+        siteUrl: c.env.APP_BASE_URL,
+        siteName: "job-maxxing",
+      });
     } catch {
       llm = undefined;
     }

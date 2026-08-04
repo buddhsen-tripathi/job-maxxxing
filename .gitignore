@@ -4,3 +4,5 @@ dist
 coverage
 .dev.vars
 worker-configuration.d.ts
+candidate-profile.json
+buddhsen-tripathi.pdf

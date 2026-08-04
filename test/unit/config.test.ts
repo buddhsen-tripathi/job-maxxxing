@@ -36,8 +36,8 @@ describe("parseSecrets", () => {
     TELEGRAM_BOT_TOKEN: "token",
     TELEGRAM_WEBHOOK_SECRET: "secret",
     TELEGRAM_ALLOWED_CHAT_ID: "123",
-    LLM_API_KEY: "key",
-    LLM_MODEL: "model",
+    OPENROUTER_API_KEY: "key",
+    OPENROUTER_MODEL: "model",
   };
 
   it("parses when all secrets are present", () => {
@@ -51,6 +51,8 @@ describe("parseSecrets", () => {
   });
 
   it("rejects empty secret values", () => {
-    expect(() => parseSecrets(baseEnv({ ...secrets, LLM_API_KEY: "" }))).toThrow(/LLM_API_KEY/);
+    expect(() => parseSecrets(baseEnv({ ...secrets, OPENROUTER_API_KEY: "" }))).toThrow(
+      /OPENROUTER_API_KEY/,
+    );
   });
 });

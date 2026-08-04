@@ -1,17 +1,18 @@
 {
-  // Cron: 13:00 UTC daily = 9:00 AM New York (EDT) / 8:00 AM (EST).
+  // Cron every 6 hours UTC: 00:00, 06:00, 12:00, 18:00
+  // (= 8pm / 2am / 8am / 2pm America/New_York during EDT).
   "name": "job-maxxing",
   "main": "src/index.ts",
   "compatibility_date": "2025-07-12",
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
-    "crons": ["0 13 * * *"]
+    "crons": ["0 */6 * * *"]
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "job-maxxing",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "8ce02da8-fb5f-4edd-b81e-b42f5547eb8e",
       "migrations_dir": "migrations"
     }
   ],

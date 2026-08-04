@@ -9,8 +9,8 @@ consequential action requires explicit human approval.
 ## Stack
 
 - Cloudflare Workers + Hono + TypeScript (strict), Bun
-- D1 (SQLite), Cron Trigger `0 13 * * *` (13:00 UTC = 9:00 AM New York EDT / 8:00 AM EST)
-- Telegram Bot API over fetch, provider-neutral LLM client (OpenAI-compatible)
+- D1 (SQLite), Cron Trigger `0 */6 * * *` (every 6 hours UTC)
+- Telegram Bot API over fetch, LLM scoring via OpenRouter (OpenAI-compatible API)
 - Vitest via `@cloudflare/vitest-pool-workers`, Biome, Wrangler
 
 ## Local setup
@@ -41,16 +41,16 @@ Secrets (set with `bunx wrangler secret put <NAME>` in production, `.dev.vars` l
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Random string; verified on every webhook call |
 | `TELEGRAM_ALLOWED_CHAT_ID` | Your personal chat ID (allowlist) |
-| `LLM_API_KEY` | OpenAI-compatible API key |
-| `LLM_MODEL` | Model name (e.g. `gpt-4o-mini`) |
+| `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai/keys) API key |
+| `OPENROUTER_MODEL` | OpenRouter model id (e.g. `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`) |
 | `ADMIN_TOKEN` | Bearer token for `/api/admin/*` |
 
 Non-secret JSON vars (can also be `.dev.vars` or wrangler `vars`):
 
 - `SOURCES_JSON` — discovery sources, e.g.
   `[{"source":"greenhouse","company":"Acme","boardToken":"acme"},{"source":"lever","company":"Beta","account":"beta"}]`
-- `CANDIDATE_PROFILE_JSON` — validated candidate profile (see
-  `candidate-profile.example.json`; every generated claim traces to this data)
+- Candidate profile is stored in D1 `app_config` key `candidate_profile` (Wrangler secrets
+  are capped at ~5KB). Optional fallback: `CANDIDATE_PROFILE_JSON` env for local/tests.
 
 ## Production deployment (from a clean checkout)
 
@@ -65,7 +65,7 @@ bunx wrangler d1 migrations apply job-maxxing --remote
 
 # 3. Set secrets
 for s in TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_ALLOWED_CHAT_ID \
-         LLM_API_KEY LLM_MODEL ADMIN_TOKEN SOURCES_JSON CANDIDATE_PROFILE_JSON; do
+         OPENROUTER_API_KEY OPENROUTER_MODEL ADMIN_TOKEN SOURCES_JSON CANDIDATE_PROFILE_JSON; do
   bunx wrangler secret put $s
 done
 
@@ -85,19 +85,19 @@ curl -X POST https://<worker>.workers.dev/api/admin/run-daily \
   -d '{"dryRun": true, "limit": 5}'
 ```
 
-The cron trigger then runs the search daily at 13:00 UTC with no manual
+The cron trigger then runs the search every 6 hours UTC with no manual
 intervention. A failed production run sends a safe Telegram error notice.
 
 ## Operations
 
 - **Manual run**: `POST /api/admin/run-daily` (`{"dryRun": false}`). Only one
-  non-dry run executes per UTC date (run lock).
+  non-dry run executes per 6-hour UTC slot (run lock).
 - **Cost/usage limits**: scoring only runs on new, filter-eligible jobs; use
   `limit` in dry runs; LLM concurrency is capped at 2; source concurrency at 3.
 - **Backup/export**: `bunx wrangler d1 export job-maxxing --remote --output backup.sql`
 - **Recovery**: restore with `bunx wrangler d1 execute job-maxxing --remote --file backup.sql`.
-  Re-running a day is safe — discovery and digests are idempotent; to force a
-  re-run, delete that date's row in `run_locks`.
+  Re-running a slot is safe — discovery and digests are idempotent; to force a
+  re-run, delete that slot's row in `run_locks`.
 - **Rollback**: `bunx wrangler rollback` (or redeploy a previous git commit).
 - **Logs**: `bunx wrangler tail` — structured JSON with runId/jobId/source,
   never tokens or personal data.
@@ -115,4 +115,3 @@ intervention. A failed production run sends a safe Telegram error notice.
 
 - The MVP never submits applications. Preparation distinguishes verified,
   derived, and unknown answers; demographic questions stay unanswered.
-- See PLAN.md for the full implementation plan and milestone history.

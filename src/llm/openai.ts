@@ -8,7 +8,13 @@ interface ChatCompletionResponse {
 }
 
 async function chatCompletion(
-  options: { apiKey: string; model: string; baseUrl: string; fetchImpl: typeof globalThis.fetch },
+  options: {
+    apiKey: string;
+    model: string;
+    baseUrl: string;
+    headers?: Record<string, string>;
+    fetchImpl: typeof globalThis.fetch;
+  },
   messages: { system: string; user: string },
 ): Promise<unknown> {
   const response = await fetchWithTimeout(
@@ -19,6 +25,7 @@ async function chatCompletion(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${options.apiKey}`,
+        ...options.headers,
       },
       body: JSON.stringify({
         model: options.model,
@@ -58,16 +65,19 @@ async function chatCompletion(
   }
 }
 
-export function createOpenAiLlmClient(options: {
+/** OpenAI-compatible chat completions client (OpenRouter, OpenAI, etc.). */
+export function createOpenAiCompatibleClient(options: {
   apiKey: string;
   model: string;
-  baseUrl?: string;
+  baseUrl: string;
+  headers?: Record<string, string>;
   fetchImpl?: typeof globalThis.fetch;
 }): LlmClient {
   const config = {
     apiKey: options.apiKey,
     model: options.model,
-    baseUrl: options.baseUrl ?? "https://api.openai.com/v1",
+    baseUrl: options.baseUrl,
+    ...(options.headers ? { headers: options.headers } : {}),
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
   };
   return {
@@ -77,4 +87,19 @@ export function createOpenAiLlmClient(options: {
     answerQuestion: (request: AnswerQuestionRequest) =>
       chatCompletion(config, buildAnswerMessages(request.question, request.job, request.profile)),
   };
+}
+
+/** @deprecated Prefer createOpenRouterLlmClient — kept for tests/overrides. */
+export function createOpenAiLlmClient(options: {
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  fetchImpl?: typeof globalThis.fetch;
+}): LlmClient {
+  return createOpenAiCompatibleClient({
+    apiKey: options.apiKey,
+    model: options.model,
+    baseUrl: options.baseUrl ?? "https://api.openai.com/v1",
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
 }

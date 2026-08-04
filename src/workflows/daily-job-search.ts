@@ -1,5 +1,5 @@
 import {
-  parseCandidateProfileEnv,
+  loadCandidateProfile,
   parseSecrets,
   parseSourcesConfig,
   parseTelegramSecrets,
@@ -23,10 +23,10 @@ import { applyHardFilters } from "../jobs/filters";
 import { chooseDigestJobs, type ScoredJob, type ScoreThresholds, scoreJobs } from "../jobs/scoring";
 import type { LlmClient } from "../llm/client";
 import { createMockLlmClient } from "../llm/mock";
-import { createOpenAiLlmClient } from "../llm/openai";
+import { createOpenRouterLlmClient } from "../llm/openrouter";
 import { errorMessage } from "../shared/errors";
 import { createLogger, type Logger } from "../shared/logger";
-import { utcDateKey } from "../shared/time";
+import { utcSixHourSlotKey } from "../shared/time";
 import { createTelegramClient } from "../telegram/client";
 import { createTelegramNotifier } from "../telegram/notifier";
 
@@ -80,6 +80,7 @@ export interface RunSummary {
   shortlistedCount: number;
   scoringFailures: number;
   sourceFailures: SourceFailure[];
+  filterRejects?: Record<string, number>;
   error?: string;
 }
 
@@ -95,10 +96,10 @@ export interface DailyRunOptions {
   thresholds?: ScoreThresholds;
 }
 
-async function acquireRunLock(db: D1Database, dateKey: string, runId: string): Promise<boolean> {
+async function acquireRunLock(db: D1Database, slotKey: string, runId: string): Promise<boolean> {
   const result = await db
     .prepare("INSERT OR IGNORE INTO run_locks (date, run_id, created_at) VALUES (?, ?, ?)")
-    .bind(dateKey, runId, new Date().toISOString())
+    .bind(slotKey, runId, new Date().toISOString())
     .run();
   return result.meta.changes === 1;
 }
@@ -107,7 +108,12 @@ function resolveLlmClient(env: Env, override: LlmClient | undefined, logger: Log
   if (override) return override;
   try {
     const secrets = parseSecrets(env);
-    return createOpenAiLlmClient({ apiKey: secrets.LLM_API_KEY, model: secrets.LLM_MODEL });
+    return createOpenRouterLlmClient({
+      apiKey: secrets.OPENROUTER_API_KEY,
+      model: secrets.OPENROUTER_MODEL,
+      siteUrl: env.APP_BASE_URL,
+      siteName: "job-maxxing",
+    });
   } catch {
     logger.warn({
       operation: "daily_job_search",
@@ -163,7 +169,7 @@ export async function runDailyJobSearch(
   };
 
   if (!dryRun) {
-    const locked = await acquireRunLock(env.DB, utcDateKey(now), crypto.randomUUID());
+    const locked = await acquireRunLock(env.DB, utcSixHourSlotKey(now), crypto.randomUUID());
     if (!locked) {
       logger.warn({
         operation: "daily_job_search",
@@ -182,7 +188,7 @@ export async function runDailyJobSearch(
   const summary: RunSummary = { ...emptySummary, runId: run.id, status: "completed" };
 
   try {
-    const profile = parseCandidateProfileEnv(env);
+    const profile = await loadCandidateProfile(env);
     const allSources = parseSourcesConfig(env);
     const sources = options.sourceNames
       ? allSources.filter((entry) => options.sourceNames?.includes(entry.source))
@@ -207,11 +213,33 @@ export async function runDailyJobSearch(
     const eligible: JobRow[] = [];
 
     if (dryRun) {
+      const filterRejects: Record<string, number> = {};
       for (const job of discovery.jobs) {
         const existing = await getJobByFingerprint(env.DB, job.fingerprint);
         if (existing) continue;
         summary.newCount += 1;
-        const asRow = { ...job, id: `dry-${job.fingerprint}` } as unknown as JobRow;
+        const asRow: JobRow = {
+          id: `dry-${job.fingerprint}`,
+          fingerprint: job.fingerprint,
+          source: job.source,
+          source_job_id: job.sourceJobId ?? null,
+          company: job.company,
+          title: job.title,
+          location: job.location ?? null,
+          employment_type: job.employmentType ?? null,
+          workplace_type: job.workplaceType,
+          description: job.description,
+          apply_url: job.applyUrl,
+          canonical_url: job.canonicalUrl,
+          salary_min: job.salary?.min ?? null,
+          salary_max: job.salary?.max ?? null,
+          salary_currency: job.salary?.currency ?? null,
+          posted_at: job.postedAt ?? null,
+          discovered_at: job.discoveredAt,
+          last_seen_at: job.discoveredAt,
+          raw_payload: job.rawPayload === undefined ? null : JSON.stringify(job.rawPayload),
+          status: "discovered",
+        };
         const filter = applyHardFilters(asRow, {
           preferences: profile.preferences,
           profile,
@@ -219,8 +247,19 @@ export async function runDailyJobSearch(
           hasApplied: false,
           previouslySkipped: false,
         });
-        if (filter.eligible) eligible.push(asRow);
+        if (filter.eligible) {
+          eligible.push(asRow);
+        } else {
+          filterRejects[filter.reasonCode] = (filterRejects[filter.reasonCode] ?? 0) + 1;
+        }
       }
+      summary.filterRejects = filterRejects;
+      runLogger.info({
+        operation: "daily_job_search",
+        status: "dry_run_filters",
+        filterRejects,
+        eligibleCount: eligible.length,
+      });
     } else {
       for (const job of discovery.jobs) {
         const { job: row, isNew } = await upsertDiscoveredJob(env.DB, {
