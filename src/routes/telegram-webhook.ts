@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import type { CandidateProfile } from "../candidate/profile";
 import {
   loadCandidateProfile,
   parseSecrets,
   parseTelegramSecrets,
   type TelegramSecrets,
 } from "../config";
-import type { CandidateProfile } from "../candidate/profile";
 import type { Env } from "../env";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
 import { handleCallbackQuery } from "../telegram/callbacks";

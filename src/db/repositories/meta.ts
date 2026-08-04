@@ -80,7 +80,6 @@ export async function setAppConfigValue(
     .run();
 }
 
-
 export async function listAuditEvents(
   db: D1Database,
   entityType: string,
