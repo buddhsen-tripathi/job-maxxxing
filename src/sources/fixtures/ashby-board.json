@@ -1,0 +1,67 @@
+{
+  "jobs": [
+    {
+      "id": "ashby-job-1",
+      "title": "Software Engineer, Platform",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "FullTime",
+      "location": "Remote (US)",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-job-1",
+      "applyUrl": "https://jobs.ashbyhq.com/example/ashby-job-1/application",
+      "publishedAt": "2026-07-01T12:00:00.000+00:00",
+      "descriptionHtml": "<p>Build APIs in <strong>TypeScript</strong>.</p>",
+      "descriptionPlain": "Build APIs in TypeScript."
+    },
+    {
+      "id": "ashby-job-2",
+      "title": "Product Designer",
+      "department": "Design",
+      "team": "Design",
+      "employmentType": "FullTime",
+      "location": "New York, NY",
+      "isListed": true,
+      "isRemote": false,
+      "workplaceType": "Hybrid",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-job-2",
+      "applyUrl": "https://jobs.ashbyhq.com/example/ashby-job-2/application",
+      "publishedAt": "2026-07-02T12:00:00.000+00:00",
+      "descriptionHtml": "<p>Design product experiences.</p>",
+      "descriptionPlain": "Design product experiences."
+    },
+    {
+      "id": "ashby-job-3",
+      "title": "Engineering Manager",
+      "department": "Engineering",
+      "team": "Management",
+      "employmentType": "FullTime",
+      "location": "San Francisco, CA",
+      "isListed": true,
+      "isRemote": false,
+      "workplaceType": "Onsite",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-job-3",
+      "applyUrl": "https://jobs.ashbyhq.com/example/ashby-job-3/application",
+      "publishedAt": "2026-07-03T12:00:00.000+00:00",
+      "descriptionHtml": "<p>Lead the engineering team.</p>",
+      "descriptionPlain": "Lead the engineering team."
+    },
+    {
+      "id": "ashby-job-4",
+      "title": "Backend Engineer Intern",
+      "department": "Engineering",
+      "team": "Backend",
+      "employmentType": "Intern",
+      "location": "Remote",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-job-4",
+      "applyUrl": "https://jobs.ashbyhq.com/example/ashby-job-4/application",
+      "publishedAt": "2026-07-04T12:00:00.000+00:00",
+      "descriptionHtml": "<p></p>"
+    }
+  ]
+}
