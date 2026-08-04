@@ -22,11 +22,26 @@ const SOURCES = [
 ];
 
 function fixtureFetch(options: { greenhouseStatus?: number } = {}): typeof globalThis.fetch {
+  const byId = new Map(greenhouseFixture.jobs.map((job) => [String(job.id), job]));
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("boards-api.greenhouse.io")) {
       const status = options.greenhouseStatus ?? 200;
-      return new Response(status === 200 ? JSON.stringify(greenhouseFixture) : "error", { status });
+      if (status !== 200) return new Response("error", { status });
+      const match = url.match(/\/jobs\/(\d+)$/);
+      if (match) {
+        const job = byId.get(must(match[1]));
+        return new Response(JSON.stringify(job ?? {}), {
+          status: job ? 200 : 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          jobs: greenhouseFixture.jobs.map(({ content: _content, ...rest }) => rest),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     if (url.includes("api.lever.co")) {
       return new Response(JSON.stringify(leverFixture), { status: 200 });
@@ -79,6 +94,8 @@ beforeEach(async () => {
     "run_locks",
     "audit_events",
     "blocked_companies",
+    "user_profiles",
+    "ats_boards",
   ]) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -93,29 +110,29 @@ describe("runDailyJobSearch", () => {
     const summary = await runDailyJobSearch(env, baseOptions(t));
 
     expect(summary.status).toBe("completed");
-    expect(summary.discoveredCount).toBe(5);
-    expect(summary.newCount).toBe(5);
+    expect(summary.discoveredCount).toBe(4);
+    expect(summary.newCount).toBe(4);
     expect(summary.eligibleCount).toBe(3);
     expect(summary.shortlistedCount).toBe(3);
     expect(t.digests).toHaveLength(1);
     expect(t.digests[0]?.jobs.map((j) => j.score.totalScore)).toEqual([55, 55, 42]);
 
     const jobs = await listJobs(db);
-    expect(jobs).toHaveLength(5);
+    expect(jobs).toHaveLength(4);
     const scored = jobs.filter((j) => j.status === "scored");
     expect(scored).toHaveLength(3);
     const filteredOut = jobs.filter((j) => j.status === "rejected_by_filter");
-    expect(filteredOut).toHaveLength(2);
+    expect(filteredOut).toHaveLength(1);
 
     const scores = await db.prepare("SELECT COUNT(*) AS n FROM job_scores").first<{ n: number }>();
     expect(scores?.n).toBe(3);
 
     const run = must(await getRun(db, must(summary.runId)));
     expect(run.status).toBe("completed");
-    expect(run.new_count).toBe(5);
+    expect(run.new_count).toBe(4);
   });
 
-  it("prevents a second run in the same 6-hour UTC slot (run lock)", async () => {
+  it("prevents a second run in the same 3-hour UTC slot (run lock)", async () => {
     const t1 = createTestNotifier();
     const first = await runDailyJobSearch(env, baseOptions(t1));
     expect(first.status).toBe("completed");
@@ -124,15 +141,15 @@ describe("runDailyJobSearch", () => {
     const second = await runDailyJobSearch(env, baseOptions(t2));
     expect(second.status).toBe("skipped");
     expect(t2.digests).toHaveLength(0);
-    expect(await listJobs(db)).toHaveLength(5);
+    expect(await listJobs(db)).toHaveLength(4);
   });
 
-  it("allows a run in the next 6-hour UTC slot", async () => {
+  it("allows a run in the next 3-hour UTC slot", async () => {
     await runDailyJobSearch(env, baseOptions(createTestNotifier()));
     const t = createTestNotifier();
     const summary = await runDailyJobSearch(env, {
       ...baseOptions(t),
-      now: new Date("2026-07-31T18:00:00.000Z"),
+      now: new Date("2026-07-31T15:00:00.000Z"),
     });
     expect(summary.status).toBe("completed");
     expect(summary.newCount).toBe(0);
@@ -151,7 +168,7 @@ describe("runDailyJobSearch", () => {
     expect(summary.eligibleCount).toBe(0);
     expect(t.digests).toHaveLength(0);
     expect(t.noMatches).toHaveLength(1);
-    expect(await listJobs(db)).toHaveLength(5);
+    expect(await listJobs(db)).toHaveLength(4);
   });
 
   it("isolates a failing source and still completes", async () => {
@@ -171,8 +188,8 @@ describe("runDailyJobSearch", () => {
     const summary = await runDailyJobSearch(env, { ...baseOptions(t), dryRun: true });
     expect(summary.status).toBe("completed");
     expect(summary.dryRun).toBe(true);
-    expect(summary.discoveredCount).toBe(5);
-    expect(summary.newCount).toBe(5);
+    expect(summary.discoveredCount).toBe(4);
+    expect(summary.newCount).toBe(4);
     expect(t.digests).toHaveLength(0);
     expect(t.noMatches).toHaveLength(0);
     expect(await listJobs(db)).toHaveLength(0);
@@ -200,13 +217,28 @@ describe("admin run-daily endpoint", () => {
         "Content-Type": "application/json",
         Authorization: "Bearer test-admin-token",
       },
-      body: JSON.stringify({ dryRun: true, sourceNames: [] }),
+      body: JSON.stringify({ dryRun: true, sync: true, sourceNames: [] }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { summary: RunSummary };
     expect(body.summary.dryRun).toBe(true);
     expect(body.summary.status).toBe("completed");
     expect(await listJobs(db)).toHaveLength(0);
+  });
+
+  it("accepts an async run and returns 202", async () => {
+    const response = await SELF.fetch("http://localhost/api/admin/run-daily", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-admin-token",
+      },
+      body: JSON.stringify({ dryRun: true, sourceNames: [] }),
+    });
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { accepted: boolean; dryRun: boolean };
+    expect(body.accepted).toBe(true);
+    expect(body.dryRun).toBe(true);
   });
 });
 

@@ -36,10 +36,24 @@ beforeAll(() => {
 afterAll(() => fetchMock.deactivate());
 
 function fixtureFetch(): typeof globalThis.fetch {
+  const byId = new Map(greenhouseFixture.jobs.map((job) => [String(job.id), job]));
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("boards-api.greenhouse.io")) {
-      return new Response(JSON.stringify(greenhouseFixture), { status: 200 });
+      const match = url.match(/\/jobs\/(\d+)$/);
+      if (match) {
+        const job = byId.get(must(match[1]));
+        return new Response(JSON.stringify(job ?? {}), {
+          status: job ? 200 : 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          jobs: greenhouseFixture.jobs.map(({ content: _content, ...rest }) => rest),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     if (url.includes("api.lever.co")) {
       return new Response(JSON.stringify(leverFixture), { status: 200 });
@@ -74,6 +88,8 @@ beforeEach(async () => {
     "telegram_messages",
     "audit_events",
     "blocked_companies",
+    "user_profiles",
+    "ats_boards",
   ]) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -102,7 +118,7 @@ describe("end-to-end smoke", () => {
     // 2. Real run via the production notifier path (Telegram secrets from bindings).
     const summary = await runDailyJobSearch(env, options);
     expect(summary.status).toBe("completed");
-    expect(summary.newCount).toBe(5);
+    expect(summary.newCount).toBe(4);
 
     // 3. Digest sent: one summary + one card per digest job; recorded in D1.
     const sends = telegramCalls.filter((c) => c.method === "sendMessage");

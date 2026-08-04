@@ -9,9 +9,15 @@ export function utcDateKey(date: Date): string {
 /** Lock key for a 6-hour UTC window (00, 06, 12, 18), e.g. "2026-08-04T12". */
 export function utcSixHourSlotKey(date: Date): string {
   const hour = Math.floor(date.getUTCHours() / 6) * 6;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour),
-  )
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour))
+    .toISOString()
+    .slice(0, 13);
+}
+
+/** Lock key for a 3-hour UTC slot (00, 03, 06, …, 21), e.g. "2026-08-04T12". */
+export function utcThreeHourSlotKey(date: Date): string {
+  const hour = Math.floor(date.getUTCHours() / 3) * 3;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour))
     .toISOString()
     .slice(0, 13);
 }
