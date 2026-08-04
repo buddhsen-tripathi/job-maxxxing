@@ -12,7 +12,7 @@ const GreenhouseJobSchema = z.object({
   location: z.object({ name: z.string() }).optional(),
   content: z.string().optional(),
   updated_at: z.string().optional(),
-  metadata: z.array(z.object({ name: z.string(), value: z.unknown() })).optional(),
+  metadata: z.array(z.object({ name: z.string(), value: z.unknown() })).nullish(),
 });
 
 const GreenhouseBoardResponseSchema = z.object({

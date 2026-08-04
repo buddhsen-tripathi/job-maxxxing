@@ -202,7 +202,7 @@ describe("telegram notifier", () => {
 
     const sends = calls.filter((c) => c.method === "sendMessage");
     expect(sends).toHaveLength(2);
-    expect(String(sends[0]?.body.text)).toContain("Daily Job Search");
+    expect(String(sends[0]?.body.text)).toContain("Job Search");
     expect(String(sends[1]?.body.text)).toContain("Backend Software Engineer");
 
     const recorded = await db

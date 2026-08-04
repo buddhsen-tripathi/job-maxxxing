@@ -115,7 +115,7 @@ describe("runDailyJobSearch", () => {
     expect(run.new_count).toBe(5);
   });
 
-  it("prevents a second run on the same UTC date (run lock)", async () => {
+  it("prevents a second run in the same 6-hour UTC slot (run lock)", async () => {
     const t1 = createTestNotifier();
     const first = await runDailyJobSearch(env, baseOptions(t1));
     expect(first.status).toBe("completed");
@@ -125,6 +125,18 @@ describe("runDailyJobSearch", () => {
     expect(second.status).toBe("skipped");
     expect(t2.digests).toHaveLength(0);
     expect(await listJobs(db)).toHaveLength(5);
+  });
+
+  it("allows a run in the next 6-hour UTC slot", async () => {
+    await runDailyJobSearch(env, baseOptions(createTestNotifier()));
+    const t = createTestNotifier();
+    const summary = await runDailyJobSearch(env, {
+      ...baseOptions(t),
+      now: new Date("2026-07-31T18:00:00.000Z"),
+    });
+    expect(summary.status).toBe("completed");
+    expect(summary.newCount).toBe(0);
+    expect(t.noMatches).toHaveLength(1);
   });
 
   it("a next-day run rediscovers without duplicating jobs or digests", async () => {

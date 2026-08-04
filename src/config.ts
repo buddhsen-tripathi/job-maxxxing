@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type CandidateProfile, parseCandidateProfile } from "./candidate/profile";
+import { getAppConfigValue } from "./db/repositories/meta";
 import type { Env } from "./env";
 import { type SourceEntry, SourcesConfigSchema } from "./sources/source-adapter";
 
@@ -7,8 +8,8 @@ const SecretsSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1),
   TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1),
-  LLM_API_KEY: z.string().min(1),
-  LLM_MODEL: z.string().min(1),
+  OPENROUTER_API_KEY: z.string().min(1),
+  OPENROUTER_MODEL: z.string().min(1),
 });
 
 export type Secrets = z.infer<typeof SecretsSchema>;
@@ -36,8 +37,8 @@ export function parseSecrets(env: Env): Secrets {
     TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET: env.TELEGRAM_WEBHOOK_SECRET,
     TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID,
-    LLM_API_KEY: env.LLM_API_KEY,
-    LLM_MODEL: env.LLM_MODEL,
+    OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
+    OPENROUTER_MODEL: env.OPENROUTER_MODEL,
   });
   if (!result.success) {
     const missing = result.error.issues.map((i) => i.path.join(".")).join(", ");
@@ -86,6 +87,27 @@ export function parseSourcesConfig(env: Env): SourceEntry[] {
   return result.data;
 }
 
+export async function loadCandidateProfile(env: Env): Promise<CandidateProfile> {
+  const fromDb = await getAppConfigValue(env.DB, "candidate_profile");
+  if (fromDb) {
+    try {
+      return parseCandidateProfile(JSON.parse(fromDb));
+    } catch (error) {
+      throw new Error(
+        `Invalid candidate_profile in app_config: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  const raw = parseJsonEnv(env.CANDIDATE_PROFILE_JSON, "CANDIDATE_PROFILE_JSON");
+  if (raw === null) {
+    throw new Error(
+      "Missing candidate profile: set app_config.candidate_profile or CANDIDATE_PROFILE_JSON",
+    );
+  }
+  return parseCandidateProfile(raw);
+}
+
+/** @deprecated Prefer loadCandidateProfile — sync env-only path for tests. */
 export function parseCandidateProfileEnv(env: Env): CandidateProfile {
   const raw = parseJsonEnv(env.CANDIDATE_PROFILE_JSON, "CANDIDATE_PROFILE_JSON");
   if (raw === null) {

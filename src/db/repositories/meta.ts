@@ -57,6 +57,30 @@ export async function insertAuditEvent(
   return db.prepare("SELECT * FROM audit_events WHERE id = ?").bind(id).first<AuditEventRow>();
 }
 
+export async function getAppConfigValue(db: D1Database, key: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT value_json FROM app_config WHERE key = ?")
+    .bind(key)
+    .first<{ value_json: string }>();
+  return row?.value_json ?? null;
+}
+
+export async function setAppConfigValue(
+  db: D1Database,
+  key: string,
+  value: unknown,
+  now?: Date,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO app_config (key, value_json, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+    )
+    .bind(key, JSON.stringify(value), nowIso(now))
+    .run();
+}
+
+
 export async function listAuditEvents(
   db: D1Database,
   entityType: string,

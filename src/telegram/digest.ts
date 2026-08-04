@@ -17,7 +17,7 @@ export interface DigestSummaryInput {
 
 export function renderDigestSummary(input: DigestSummaryInput): string {
   return [
-    `<b>Daily Job Search — ${formatNyDate(input.date)}</b>`,
+    `<b>Job Search — ${formatNyDate(input.date)}</b>`,
     "",
     `Sources checked: ${input.sourcesChecked}`,
     `Jobs discovered: ${input.discoveredCount}`,
@@ -29,13 +29,13 @@ export function renderDigestSummary(input: DigestSummaryInput): string {
 
 export function renderNoMatches(input: Omit<DigestSummaryInput, "matchCount">): string {
   return [
-    `<b>Daily Job Search — ${formatNyDate(input.date)}</b>`,
+    `<b>Job Search — ${formatNyDate(input.date)}</b>`,
     "",
     `Sources checked: ${input.sourcesChecked}`,
     `Jobs discovered: ${input.discoveredCount}`,
     `New jobs: ${input.newCount}`,
     "",
-    "No strong matches today.",
+    "No strong matches this run.",
   ].join("\n");
 }
 

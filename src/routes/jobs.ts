@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { prepareApplication } from "../applications/prepare";
-import { parseCandidateProfileEnv } from "../config";
+import { loadCandidateProfile } from "../config";
 import {
   getJobById,
   getLatestScoreForJob,
@@ -71,7 +71,7 @@ export const jobs = new Hono<{ Bindings: Env }>()
     try {
       const prepared = await prepareApplication(c.env.DB, {
         jobId: job.id,
-        profile: parseCandidateProfileEnv(c.env),
+        profile: await loadCandidateProfile(c.env),
       });
       return c.json({ prepared });
     } catch (error) {
