@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { type CandidateProfile, parseCandidateProfile } from "./candidate/profile";
+import {
+  boardToSourceEntry,
+  countActiveAtsBoards,
+  selectBoardsForIngest,
+} from "./db/repositories/boards";
 import { getAppConfigValue } from "./db/repositories/meta";
+import {
+  ensureUser,
+  listActiveUsersWithProfiles,
+  loadProfileForUser,
+  upsertUserProfile,
+} from "./db/repositories/users";
 import type { Env } from "./env";
 import { type SourceEntry, SourcesConfigSchema } from "./sources/source-adapter";
 
@@ -77,6 +88,7 @@ function parseJsonEnv(raw: string | undefined, name: string): unknown | null {
   }
 }
 
+/** Sync env-only source list (tests / local override). Prefer D1 ats_boards in prod. */
 export function parseSourcesConfig(env: Env): SourceEntry[] {
   const raw = parseJsonEnv(env.SOURCES_JSON, "SOURCES_JSON");
   if (raw === null) return [];
@@ -87,24 +99,113 @@ export function parseSourcesConfig(env: Env): SourceEntry[] {
   return result.data;
 }
 
-export async function loadCandidateProfile(env: Env): Promise<CandidateProfile> {
+export interface LoadSourcesOptions {
+  /** Force SOURCES_JSON even when D1 has boards (tests). */
+  preferEnvSources?: boolean;
+  standardBatchSize?: number;
+  sourceNames?: string[];
+}
+
+export async function loadSourcesForIngest(
+  env: Env,
+  options: LoadSourcesOptions = {},
+): Promise<{ entries: SourceEntry[]; boardIds: string[]; fromCatalog: boolean }> {
+  const catalogCount = options.preferEnvSources ? 0 : await countActiveAtsBoards(env.DB);
+
+  if (catalogCount > 0) {
+    const boards = await selectBoardsForIngest(env.DB, {
+      ...(options.standardBatchSize !== undefined
+        ? { standardBatchSize: options.standardBatchSize }
+        : {}),
+    });
+    let entries = boards.map(boardToSourceEntry);
+    if (options.sourceNames?.length) {
+      entries = entries.filter((entry) => options.sourceNames?.includes(entry.source));
+    }
+    return {
+      entries,
+      boardIds: boards.map((b) => b.id),
+      fromCatalog: true,
+    };
+  }
+
+  let entries = parseSourcesConfig(env);
+  if (options.sourceNames?.length) {
+    entries = entries.filter((entry) => options.sourceNames?.includes(entry.source));
+  }
+  return { entries, boardIds: [], fromCatalog: false };
+}
+
+async function readLegacyProfile(env: Env): Promise<CandidateProfile | null> {
   const fromDb = await getAppConfigValue(env.DB, "candidate_profile");
   if (fromDb) {
-    try {
-      return parseCandidateProfile(JSON.parse(fromDb));
-    } catch (error) {
-      throw new Error(
-        `Invalid candidate_profile in app_config: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    return parseCandidateProfile(JSON.parse(fromDb));
   }
   const raw = parseJsonEnv(env.CANDIDATE_PROFILE_JSON, "CANDIDATE_PROFILE_JSON");
-  if (raw === null) {
-    throw new Error(
-      "Missing candidate profile: set app_config.candidate_profile or CANDIDATE_PROFILE_JSON",
-    );
-  }
+  if (raw === null) return null;
   return parseCandidateProfile(raw);
+}
+
+/**
+ * Ensure the default user has a profile row, migrating from app_config / env if needed.
+ * Also stamps telegram_chat_id from secrets when present.
+ */
+export async function ensureDefaultUserProfile(env: Env): Promise<void> {
+  let telegramChatId: string | null = null;
+  try {
+    telegramChatId = parseTelegramSecrets(env).TELEGRAM_ALLOWED_CHAT_ID;
+  } catch {
+    // optional during dry runs / tests without telegram
+  }
+
+  await ensureUser(env.DB, {
+    id: "default",
+    displayName: "Default operator",
+    telegramChatId,
+    active: true,
+  });
+
+  const existing = await loadProfileForUser(env.DB, "default");
+  if (existing) return;
+
+  const legacy = await readLegacyProfile(env);
+  if (legacy) {
+    await upsertUserProfile(env.DB, "default", legacy);
+  }
+}
+
+export async function loadCandidateProfile(env: Env): Promise<CandidateProfile> {
+  await ensureDefaultUserProfile(env);
+  const fromUser = await loadProfileForUser(env.DB, "default");
+  if (fromUser) return fromUser;
+
+  const legacy = await readLegacyProfile(env);
+  if (legacy) return legacy;
+
+  throw new Error(
+    "Missing candidate profile: set user_profiles for user 'default', app_config.candidate_profile, or CANDIDATE_PROFILE_JSON",
+  );
+}
+
+export async function loadActiveProfiles(env: Env) {
+  await ensureDefaultUserProfile(env);
+  const withProfiles = await listActiveUsersWithProfiles(env.DB);
+  if (withProfiles.length > 0) return withProfiles;
+
+  const profile = await loadCandidateProfile(env);
+  return [
+    {
+      user: {
+        id: "default",
+        display_name: "Default operator",
+        telegram_chat_id: env.TELEGRAM_ALLOWED_CHAT_ID ?? null,
+        active: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      profile,
+    },
+  ];
 }
 
 /** @deprecated Prefer loadCandidateProfile — sync env-only path for tests. */

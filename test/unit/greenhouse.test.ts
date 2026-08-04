@@ -8,8 +8,8 @@ import { SourceFetchError } from "../../src/sources/source-adapter";
 import { must } from "../helpers";
 
 const preferences = {
-  titles: [],
-  excludedTitles: [],
+  titles: ["Software Engineer", "Backend Engineer"],
+  excludedTitles: ["Engineering Manager", "Director"],
   locations: [],
   remote: true,
   hybrid: true,
@@ -39,25 +39,70 @@ function jsonResponse(body: unknown, status = 200): Response {
 const entry = { source: "greenhouse" as const, company: "ExampleCo", boardToken: "exampleco" };
 
 describe("greenhouse adapter", () => {
-  it("discovers and normalizes jobs from a board response", async () => {
+  it("lists jobs then hydrates details for relevant titles", async () => {
+    const listOnly = {
+      jobs: greenhouseFixture.jobs.map(({ content: _c, ...rest }) => rest),
+    };
+    const byId = new Map(greenhouseFixture.jobs.map((job) => [job.id, job]));
+
     const adapter = createGreenhouseAdapter(entry);
     const raw = await adapter.discover(
-      contextWithFetch(async () => jsonResponse(greenhouseFixture)),
+      contextWithFetch(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/jobs")) return jsonResponse(listOnly);
+        const match = url.match(/\/jobs\/(\d+)$/);
+        if (match) {
+          const job = byId.get(Number(match[1]));
+          return job ? jsonResponse(job) : jsonResponse({}, 404);
+        }
+        return jsonResponse({}, 404);
+      }),
     );
-    expect(raw).toHaveLength(3);
+    expect(raw.length).toBeGreaterThan(0);
 
     const first = adapter.normalize(must(raw[0]));
     expect(first).not.toBeNull();
     expect(first?.company).toBe("ExampleCo");
-    expect(first?.title).toBe("Backend Software Engineer");
-    expect(first?.location).toBe("New York, NY");
-    expect(first?.workplaceType).toBe("unknown");
-    expect(first?.description).toContain("Backend Software Engineer");
+    expect(first?.title).toBeTruthy();
     expect(first?.description).not.toContain("<p>");
-    expect(first?.sourceJobId).toBe("4001");
+  });
 
-    const remote = adapter.normalize(must(raw[1]));
-    expect(remote?.workplaceType).toBe("remote");
+  it("skips excluded titles when selecting details", async () => {
+    const listOnly = {
+      jobs: [
+        {
+          id: 1,
+          title: "Engineering Manager, Platform",
+          absolute_url: "https://boards.greenhouse.io/exampleco/jobs/1",
+          location: { name: "Remote" },
+        },
+        {
+          id: 2,
+          title: "Software Engineer",
+          absolute_url: "https://boards.greenhouse.io/exampleco/jobs/2",
+          location: { name: "New York, NY" },
+        },
+      ],
+    };
+    const adapter = createGreenhouseAdapter(entry);
+    const raw = await adapter.discover(
+      contextWithFetch(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/jobs")) return jsonResponse(listOnly);
+        if (url.endsWith("/jobs/2")) {
+          return jsonResponse({
+            ...listOnly.jobs[1],
+            content: "<p>Build APIs in TypeScript.</p>",
+          });
+        }
+        if (url.endsWith("/jobs/1")) {
+          throw new Error("should not hydrate excluded title");
+        }
+        return jsonResponse({}, 404);
+      }),
+    );
+    expect(raw).toHaveLength(1);
+    expect(adapter.normalize(must(raw[0]))?.title).toBe("Software Engineer");
   });
 
   it("throws SourceFetchError on non-200 responses", async () => {

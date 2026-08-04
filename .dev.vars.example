@@ -4,5 +4,6 @@ TELEGRAM_ALLOWED_CHAT_ID=
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4o-mini
 ADMIN_TOKEN=
+# Optional fallback when D1 ats_boards is empty (tests/local). Prefer D1 catalog in prod.
 SOURCES_JSON=
 CANDIDATE_PROFILE_JSON=

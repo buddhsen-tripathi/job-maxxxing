@@ -1,12 +1,11 @@
 {
-  // Cron every 6 hours UTC: 00:00, 06:00, 12:00, 18:00
-  // (= 8pm / 2am / 8am / 2pm America/New_York during EDT).
+  // Cron every 3 hours UTC: 00:00, 03:00, 06:00, …, 21:00 (8 runs/day).
   "name": "job-maxxing",
   "main": "src/index.ts",
   "compatibility_date": "2025-07-12",
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
-    "crons": ["0 */6 * * *"]
+    "crons": ["0 */3 * * *"]
   },
   "d1_databases": [
     {

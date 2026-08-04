@@ -1,5 +1,6 @@
 import { errorMessage } from "../shared/errors";
 import { mapWithConcurrency } from "../shared/http";
+import { createAshbyAdapter } from "../sources/ashby";
 import { createGreenhouseAdapter } from "../sources/greenhouse";
 import { createLeverAdapter } from "../sources/lever";
 import type { JobSourceAdapter, SourceEntry } from "../sources/source-adapter";
@@ -26,10 +27,12 @@ export function createAdapterForEntry(entry: SourceEntry): JobSourceAdapter {
       return createGreenhouseAdapter(entry);
     case "lever":
       return createLeverAdapter(entry);
+    case "ashby":
+      return createAshbyAdapter(entry);
   }
 }
 
-const SOURCE_CONCURRENCY = 3;
+const SOURCE_CONCURRENCY = 2;
 
 export async function discoverFromSources(
   entries: readonly SourceEntry[],

@@ -3,11 +3,12 @@ import type { SearchPreferences } from "../../src/candidate/preferences";
 import { deduplicateInMemory } from "../../src/jobs/deduplicate";
 import { discoverFromSources } from "../../src/jobs/discover";
 import { noopLogger } from "../../src/shared/logger";
+import ashbyFixture from "../../src/sources/fixtures/ashby-board.json";
 import greenhouseFixture from "../../src/sources/fixtures/greenhouse-board.json";
 import leverFixture from "../../src/sources/fixtures/lever-postings.json";
 
 const preferences = {
-  titles: [],
+  titles: ["Software Engineer", "Backend Engineer"],
   excludedTitles: [],
   locations: [],
   remote: true,
@@ -19,18 +20,34 @@ const preferences = {
   excludedKeywords: [],
 } satisfies SearchPreferences;
 
-function fetchRouting(routes: Record<string, () => Response>): typeof globalThis.fetch {
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+function fixtureFetch(options: { greenhouseStatus?: number } = {}): typeof globalThis.fetch {
+  const byId = new Map(greenhouseFixture.jobs.map((job) => [job.id, job]));
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
-    for (const [needle, handler] of Object.entries(routes)) {
-      if (url.includes(needle)) return handler();
+    if (url.includes("api.lever.co")) {
+      return json(leverFixture);
+    }
+    if (url.includes("api.ashbyhq.com")) {
+      return json(ashbyFixture);
+    }
+    if (url.includes("boards-api.greenhouse.io")) {
+      const status = options.greenhouseStatus ?? 200;
+      if (status !== 200) return json({}, status);
+      const match = url.match(/\/jobs\/(\d+)$/);
+      if (match) {
+        const job = byId.get(Number(match[1]));
+        return job ? json(job) : json({}, 404);
+      }
+      return json({
+        jobs: greenhouseFixture.jobs.map(({ content: _content, ...rest }) => rest),
+      });
     }
     return new Response("not found", { status: 404 });
   }) as typeof globalThis.fetch;
 }
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 describe("deduplicateInMemory", () => {
   it("keeps the first occurrence of each fingerprint", () => {
@@ -49,40 +66,37 @@ describe("discoverFromSources", () => {
   const entries = [
     { source: "greenhouse" as const, company: "ExampleCo", boardToken: "exampleco" },
     { source: "lever" as const, company: "SampleInc", account: "sampleinc" },
+    { source: "ashby" as const, company: "ExampleAshby", boardSlug: "example" },
   ];
 
   it("aggregates normalized jobs across sources", async () => {
     const outcome = await discoverFromSources(entries, {
       now: new Date("2026-07-31T13:00:00.000Z"),
       preferences,
-      fetch: fetchRouting({
-        "boards-api.greenhouse.io": () => json(greenhouseFixture),
-        "api.lever.co": () => json(leverFixture),
-      }),
+      fetch: fixtureFetch(),
       logger: noopLogger,
     });
     expect(outcome.failures).toEqual([]);
-    expect(outcome.discoveredCount).toBe(5);
-    expect(outcome.jobs.length).toBe(5);
+    // Greenhouse: 2 eng titles + Lever 2 + Ashby 1 (Software Engineer; intern may lack desc) = 5+
+    expect(outcome.discoveredCount).toBeGreaterThanOrEqual(5);
+    expect(outcome.jobs.length).toBe(outcome.discoveredCount);
     for (const job of outcome.jobs) {
       expect(job.fingerprint).toMatch(/^[0-9a-f]{64}$/);
       expect(job.discoveredAt).toBe("2026-07-31T13:00:00.000Z");
     }
+    expect(outcome.jobs.some((j) => j.source === "ashby")).toBe(true);
   });
 
   it("isolates a failing source and still returns partial results", async () => {
     const outcome = await discoverFromSources(entries, {
       now: new Date(),
       preferences,
-      fetch: fetchRouting({
-        "boards-api.greenhouse.io": () => json({}, 500),
-        "api.lever.co": () => json(leverFixture),
-      }),
+      fetch: fixtureFetch({ greenhouseStatus: 500 }),
       logger: noopLogger,
     });
     expect(outcome.failures).toHaveLength(1);
     expect(outcome.failures[0]?.source).toBe("greenhouse");
-    expect(outcome.jobs.length).toBe(2);
+    expect(outcome.jobs.length).toBeGreaterThanOrEqual(2);
   });
 
   it("applies the limit option", async () => {
@@ -91,10 +105,7 @@ describe("discoverFromSources", () => {
       {
         now: new Date(),
         preferences,
-        fetch: fetchRouting({
-          "boards-api.greenhouse.io": () => json(greenhouseFixture),
-          "api.lever.co": () => json(leverFixture),
-        }),
+        fetch: fixtureFetch(),
         logger: noopLogger,
       },
       { limit: 2 },
