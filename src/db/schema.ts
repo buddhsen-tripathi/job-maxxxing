@@ -125,3 +125,35 @@ export interface AuditEventRow {
   payload_json: string | null;
   created_at: string;
 }
+
+export type AtsProvider = "greenhouse" | "lever" | "ashby";
+export type AtsBoardTier = "priority" | "standard";
+
+export interface AtsBoardRow {
+  id: string;
+  provider: AtsProvider;
+  slug: string;
+  company_name: string;
+  tier: AtsBoardTier;
+  active: number;
+  sector: string | null;
+  last_polled_at: string | null;
+  last_status: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserRow {
+  id: string;
+  display_name: string | null;
+  telegram_chat_id: string | null;
+  active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserProfileRow {
+  user_id: string;
+  profile_json: string;
+  updated_at: string;
+}

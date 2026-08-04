@@ -1,0 +1,19 @@
+[
+  { "source": "greenhouse", "company": "Anthropic", "boardToken": "anthropic" },
+  { "source": "greenhouse", "company": "xAI", "boardToken": "xai" },
+  { "source": "greenhouse", "company": "Scale AI", "boardToken": "scaleai" },
+  { "source": "greenhouse", "company": "Together AI", "boardToken": "togetherai" },
+  { "source": "greenhouse", "company": "Cloudflare", "boardToken": "cloudflare" },
+  { "source": "greenhouse", "company": "Vercel", "boardToken": "vercel" },
+  { "source": "greenhouse", "company": "Figma", "boardToken": "figma" },
+  { "source": "greenhouse", "company": "Duolingo", "boardToken": "duolingo" },
+  { "source": "greenhouse", "company": "Discord", "boardToken": "discord" },
+  { "source": "greenhouse", "company": "Airbnb", "boardToken": "airbnb" },
+  { "source": "lever", "company": "Spotify", "account": "spotify" },
+  { "source": "lever", "company": "Palantir", "account": "palantir" },
+  { "source": "ashby", "company": "Ramp", "boardSlug": "ramp" },
+  { "source": "ashby", "company": "OpenAI", "boardSlug": "openai" },
+  { "source": "ashby", "company": "Notion", "boardSlug": "notion" },
+  { "source": "ashby", "company": "Linear", "boardSlug": "linear" },
+  { "source": "ashby", "company": "Cursor", "boardSlug": "cursor" }
+]
