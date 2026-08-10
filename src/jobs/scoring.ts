@@ -131,10 +131,14 @@ export async function scoreJobs(
   };
 }
 
-export async function getScoredJob(db: D1Database, jobId: string): Promise<ScoredJob | null> {
+export async function getScoredJob(
+  db: D1Database,
+  jobId: string,
+  userId = "default",
+): Promise<ScoredJob | null> {
   const job = await getJobById(db, jobId);
   if (!job) return null;
-  const row = await getLatestScoreForJob(db, jobId);
+  const row = await getLatestScoreForJob(db, jobId, userId);
   if (!row) return null;
   return {
     job,

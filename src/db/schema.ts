@@ -62,6 +62,7 @@ export interface JobRow {
 export interface JobScoreRow {
   id: string;
   job_id: string;
+  user_id: string;
   model: string;
   total_score: number;
   technical_score: number;
@@ -155,5 +156,30 @@ export interface UserRow {
 export interface UserProfileRow {
   user_id: string;
   profile_json: string;
+  updated_at: string;
+}
+
+export type UserSessionState =
+  | "awaiting_resume"
+  | "ask_titles"
+  | "ask_locations"
+  | "ask_workplace"
+  | "ask_salary"
+  | "ask_authorization"
+  | "ready";
+
+export interface UserSessionRow {
+  user_id: string;
+  state: string;
+  draft_json: string | null;
+  updated_at: string;
+}
+
+export type UserJobStatus = "shortlisted" | "skipped";
+
+export interface UserJobStateRow {
+  user_id: string;
+  job_id: string;
+  status: string;
   updated_at: string;
 }

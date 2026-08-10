@@ -133,6 +133,7 @@ export async function setJobStatus(db: D1Database, id: string, status: JobStatus
 
 export interface InsertScoreInput {
   jobId: string;
+  userId?: string;
   model: string;
   totalScore: number;
   technicalScore: number;
@@ -152,17 +153,19 @@ export async function insertJobScore(
   input: InsertScoreInput,
 ): Promise<JobScoreRow | null> {
   const id = newId();
+  const userId = input.userId ?? "default";
   await db
     .prepare(
       `INSERT INTO job_scores (
-         id, job_id, model, total_score, technical_score, experience_score,
+         id, job_id, user_id, model, total_score, technical_score, experience_score,
          domain_score, location_score, evidence_score, recommendation,
          reasons_json, risks_json, evidence_json, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
       input.jobId,
+      userId,
       input.model,
       input.totalScore,
       input.technicalScore,
@@ -183,10 +186,15 @@ export async function insertJobScore(
 export async function getLatestScoreForJob(
   db: D1Database,
   jobId: string,
+  userId = "default",
 ): Promise<JobScoreRow | null> {
   return db
-    .prepare("SELECT * FROM job_scores WHERE job_id = ? ORDER BY created_at DESC LIMIT 1")
-    .bind(jobId)
+    .prepare(
+      `SELECT * FROM job_scores
+       WHERE job_id = ? AND user_id = ?
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(jobId, userId)
     .first<JobScoreRow>();
 }
 

@@ -14,6 +14,76 @@ export async function getUser(db: D1Database, userId: string): Promise<UserRow |
   return db.prepare("SELECT * FROM users WHERE id = ?").bind(userId).first<UserRow>();
 }
 
+export async function getUserByTelegramChatId(
+  db: D1Database,
+  chatId: string,
+): Promise<UserRow | null> {
+  return db.prepare("SELECT * FROM users WHERE telegram_chat_id = ?").bind(chatId).first<UserRow>();
+}
+
+/** Provision or refresh a Telegram DM user. New users start inactive until onboarding completes. */
+export async function ensureTelegramUser(
+  db: D1Database,
+  input: {
+    chatId: string;
+    displayName?: string | null;
+    /** When set, this chat is bound to the seeded `default` user instead of `tg:*`. */
+    operatorChatId?: string | null;
+    now?: Date;
+  },
+): Promise<UserRow> {
+  const existing = await getUserByTelegramChatId(db, input.chatId);
+  if (existing) {
+    if (input.displayName && input.displayName !== existing.display_name) {
+      await ensureUser(db, {
+        id: existing.id,
+        displayName: input.displayName,
+        telegramChatId: input.chatId,
+        active: existing.active === 1,
+        ...(input.now ? { now: input.now } : {}),
+      });
+      const updated = await getUser(db, existing.id);
+      if (!updated) throw new Error(`Failed to refresh user ${existing.id}`);
+      return updated;
+    }
+    return existing;
+  }
+
+  if (input.operatorChatId && input.chatId === String(input.operatorChatId)) {
+    await ensureUser(db, {
+      id: "default",
+      displayName: input.displayName ?? "Default operator",
+      telegramChatId: input.chatId,
+      active: true,
+      ...(input.now ? { now: input.now } : {}),
+    });
+    const row = await getUser(db, "default");
+    if (!row) throw new Error("Failed to bind operator chat to default user");
+    return row;
+  }
+
+  const id = `tg:${input.chatId}`;
+  return ensureUser(db, {
+    id,
+    displayName: input.displayName ?? null,
+    telegramChatId: input.chatId,
+    active: false,
+    ...(input.now ? { now: input.now } : {}),
+  });
+}
+
+export async function setUserActive(
+  db: D1Database,
+  userId: string,
+  active: boolean,
+  now: Date = new Date(),
+): Promise<void> {
+  await db
+    .prepare("UPDATE users SET active = ?, updated_at = ? WHERE id = ?")
+    .bind(active ? 1 : 0, nowIso(now), userId)
+    .run();
+}
+
 export async function getUserProfile(
   db: D1Database,
   userId: string,
