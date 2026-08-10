@@ -138,10 +138,14 @@ describe("end-to-end smoke", () => {
     const reviewSend = telegramCalls.filter((c) => c.method === "sendMessage").at(-1);
     expect(String(reviewSend?.body.text)).toContain(target.title);
 
-    // 5. Click Shortlist; verify action and audit event in D1.
+    // 5. Click Shortlist; verify per-user save + audit event in D1.
     const shortlistResponse = await webhookCallback(`job:shortlist:${target.id}`);
     expect(shortlistResponse.status).toBe(200);
-    expect((await listJobs(db, { status: "shortlisted" }))[0]?.id).toBe(target.id);
+    const saved = await db
+      .prepare("SELECT job_id FROM user_job_states WHERE user_id = ? AND status = 'shortlisted'")
+      .bind("default")
+      .first<{ job_id: string }>();
+    expect(saved?.job_id).toBe(target.id);
     const audit = await listAuditEvents(db, "job", target.id);
     expect(audit.map((event) => event.event_type)).toContain("shortlisted");
 

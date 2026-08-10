@@ -5,6 +5,8 @@ describe("parseBotCommand", () => {
   it("parses shortlists aliases", () => {
     expect(parseBotCommand("/shortlists")).toEqual({ type: "shortlists" });
     expect(parseBotCommand("/shortlist")).toEqual({ type: "shortlists" });
+    expect(parseBotCommand("/saved")).toEqual({ type: "shortlists" });
+    expect(parseBotCommand("/links")).toEqual({ type: "shortlists" });
     expect(parseBotCommand("/shortlists@jmaxxxingbot")).toEqual({ type: "shortlists" });
   });
 

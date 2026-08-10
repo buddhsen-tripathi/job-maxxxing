@@ -96,6 +96,8 @@ function postWebhook(update: unknown, secret = "test-webhook-secret") {
 
 beforeEach(async () => {
   for (const table of [
+    "user_job_states",
+    "user_sessions",
     "job_actions",
     "job_scores",
     "applications",
@@ -106,6 +108,7 @@ beforeEach(async () => {
   ]) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
+  await db.prepare("DELETE FROM users WHERE id != 'default'").run();
   calls.length = 0;
 });
 
@@ -115,12 +118,12 @@ describe("telegram webhook security", () => {
     expect(response.status).toBe(403);
   });
 
-  it("ignores updates from non-allowlisted chats", async () => {
+  it("accepts updates from any chat (open bot)", async () => {
     const response = await postWebhook(callbackUpdate(`job:skip:${crypto.randomUUID()}`, 999));
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { ignored: boolean; reason: string };
-    expect(body.ignored).toBe(true);
-    expect(body.reason).toBe("chat_not_allowed");
+    const body = (await response.json()) as { ok?: boolean; ignored?: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.ignored).toBeUndefined();
   });
 
   it("ignores unsupported update types", async () => {
@@ -134,20 +137,22 @@ describe("telegram webhook security", () => {
 });
 
 describe("telegram slash commands", () => {
-  it("lists shortlisted jobs via /shortlists", async () => {
+  it("lists shortlisted jobs via /shortlists as a link list", async () => {
     const job = await seedScoredJob();
     await postWebhook(callbackUpdate(`job:shortlist:${job.id}`));
     calls.length = 0;
 
     const response = await postWebhook({
       update_id: 2,
-      message: { message_id: 2, chat: { id: 12345 }, text: "/shortlists" },
+      message: { message_id: 2, chat: { id: 12345 }, text: "/saved" },
     });
     expect(response.status).toBe(200);
     const sends = calls.filter((c) => c.method === "sendMessage");
-    expect(sends.length).toBeGreaterThanOrEqual(2);
-    expect(String(sends[0]?.body.text)).toContain("Shortlisted");
-    expect(String(sends[1]?.body.text)).toContain("Backend Software Engineer");
+    expect(sends).toHaveLength(1);
+    const text = String(sends[0]?.body.text);
+    expect(text).toContain("Saved");
+    expect(text).toContain("Backend Software Engineer");
+    expect(text).toContain('href="https://boards.greenhouse.io/exampleco/jobs/4001"');
   });
 
   it("replies to /help", async () => {
@@ -157,7 +162,7 @@ describe("telegram slash commands", () => {
     });
     expect(response.status).toBe(200);
     const sends = calls.filter((c) => c.method === "sendMessage");
-    expect(String(sends.at(-1)?.body.text)).toContain("/shortlists");
+    expect(String(sends.at(-1)?.body.text)).toContain("/saved");
   });
 });
 
@@ -175,7 +180,7 @@ describe("telegram callbacks", () => {
     expect(second.status).toBe(200);
     expect(await listActionsForJob(db, job.id, "shortlist")).toHaveLength(1);
     const answers = calls.filter((c) => c.method === "answerCallbackQuery");
-    expect(answers.at(-1)?.body.text).toBe("Already shortlisted.");
+    expect(answers.at(-1)?.body.text).toBe("Already saved.");
   });
 
   it("requires confirmation before blocking a company", async () => {

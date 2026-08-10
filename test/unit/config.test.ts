@@ -44,6 +44,11 @@ describe("parseSecrets", () => {
     expect(parseSecrets(baseEnv(secrets))).toEqual(secrets);
   });
 
+  it("allows omitting TELEGRAM_ALLOWED_CHAT_ID for open multi-user bots", () => {
+    const { TELEGRAM_ALLOWED_CHAT_ID: _, ...withoutAllowlist } = secrets;
+    expect(parseSecrets(baseEnv(withoutAllowlist)).OPENROUTER_API_KEY).toBe("key");
+  });
+
   it("reports which secrets are missing", () => {
     expect(() => parseSecrets(baseEnv({ TELEGRAM_BOT_TOKEN: "token" }))).toThrow(
       /TELEGRAM_WEBHOOK_SECRET/,
