@@ -1,10 +1,21 @@
 import type { CandidateProfile } from "../candidate/profile";
 import type { JobRow } from "../db/schema";
 
-export const SCORING_PROMPT_VERSION = "scoring.v1";
+export const SCORING_PROMPT_VERSION = "scoring.v2";
 export const ANSWER_PROMPT_VERSION = "answers.v1";
 
-const SCORING_SYSTEM = `You are a precise job-match scoring engine for a personal job-search agent.
+export interface ScoringPromptOptions {
+  thresholds?: { strongMatch: number; review: number };
+  preferUsBased?: boolean;
+}
+
+function buildScoringSystem(options: ScoringPromptOptions): string {
+  const strong = options.thresholds?.strongMatch ?? 85;
+  const review = options.thresholds?.review ?? 60;
+  const usRule = options.preferUsBased
+    ? "\n- The candidate strongly prefers US-based roles: locationScore 10 for US-based or US-remote roles, 5 or less for clearly non-US locations."
+    : "";
+  return `You are a precise job-match scoring engine for a personal job-search agent.
 
 Rules:
 - Score the job against the candidate profile using ONLY the evidence provided.
@@ -14,12 +25,14 @@ Rules:
 - candidateEvidenceId must be one of the provided evidence IDs, or null when no evidence exists.
 - Component ranges: technicalScore 0-40, experienceScore 0-25, domainScore 0-15, locationScore 0-10, evidenceScore 0-10.
 - totalScore must equal the exact sum of the five component scores.
-- recommendation: "strong_match" (85+), "review" (70-84), "skip" (<70).
+- recommendation: "strong_match" (${strong}+), "review" (${review}-${strong - 1}), "skip" (<${review}).${usRule}
 - Output ONLY valid JSON matching the requested shape. No markdown, no commentary.`;
+}
 
 export function buildScoringMessages(
   job: JobRow,
   profile: CandidateProfile,
+  options: ScoringPromptOptions = {},
 ): { system: string; user: string } {
   const evidenceList = profile.experience.evidence
     .map((entry) => `- ${entry.id}: ${entry.claim} (source: ${entry.source})`)
@@ -49,7 +62,7 @@ ${evidenceList || "(no evidence entries)"}
 
 Respond with JSON: {"technicalScore":int,"experienceScore":int,"domainScore":int,"locationScore":int,"evidenceScore":int,"totalScore":int,"recommendation":"strong_match"|"review"|"skip","reasons":string[],"risks":string[],"evidence":[{"jobRequirement":string,"candidateEvidenceId":string|null,"assessment":"match"|"partial"|"missing"}]}`;
 
-  return { system: SCORING_SYSTEM, user };
+  return { system: buildScoringSystem(options), user };
 }
 
 const ANSWER_SYSTEM = `You draft job-application answers for a personal job-search agent.

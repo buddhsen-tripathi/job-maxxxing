@@ -216,3 +216,24 @@ export function parseCandidateProfileEnv(env: Env): CandidateProfile {
   }
   return parseCandidateProfile(raw);
 }
+
+export function parseScoreThresholds(env: Env): { strongMatch: number; review: number } {
+  const strongRaw = env.SCORE_STRONG_MATCH_THRESHOLD;
+  const reviewRaw = env.SCORE_REVIEW_THRESHOLD;
+  const strongMatch = strongRaw === undefined ? 85 : Number(strongRaw);
+  const review = reviewRaw === undefined ? 60 : Number(reviewRaw);
+  for (const [name, value] of [
+    ["SCORE_STRONG_MATCH_THRESHOLD", strongMatch],
+    ["SCORE_REVIEW_THRESHOLD", review],
+  ] as const) {
+    if (!Number.isInteger(value) || value < 0 || value > 100) {
+      throw new Error(`${name} must be an integer between 0 and 100, got "${value}"`);
+    }
+  }
+  if (strongMatch <= review) {
+    throw new Error(
+      `SCORE_STRONG_MATCH_THRESHOLD (${strongMatch}) must be greater than SCORE_REVIEW_THRESHOLD (${review})`,
+    );
+  }
+  return { strongMatch, review };
+}

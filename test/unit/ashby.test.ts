@@ -18,6 +18,7 @@ const preferences = {
   excludedCompanies: [],
   requiredKeywords: [],
   excludedKeywords: [],
+  preferUsBased: true,
 } satisfies SearchPreferences;
 
 function contextWithFetch(fetchImpl: typeof globalThis.fetch): DiscoveryContext {

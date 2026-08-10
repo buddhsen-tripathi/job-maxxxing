@@ -2,6 +2,7 @@ import {
   loadActiveProfiles,
   loadCandidateProfile,
   loadSourcesForIngest,
+  parseScoreThresholds,
   parseSecrets,
   parseTelegramSecrets,
   parseVars,
@@ -354,6 +355,7 @@ export async function runUserMatchAndNotify(
 ): Promise<UserMatchResult> {
   const llm = resolveLlmClient(env, options.llmClient, options.logger);
   const notifier = resolveNotifier(env, options.notifier, options.logger, options.telegramChatId);
+  const thresholds = options.thresholds ?? parseScoreThresholds(env);
   const blockedCompanies = await listBlockedCompanyKeys(env.DB);
   const eligible: JobRow[] = [];
   const filterRejects: Record<string, number> = {};
@@ -395,7 +397,7 @@ export async function runUserMatchAndNotify(
     }
   }
 
-  const scoring = await scoreJobs(eligible, { client: llm, profile: options.profile });
+  const scoring = await scoreJobs(eligible, { client: llm, profile: options.profile, thresholds });
 
   if (!options.dryRun) {
     for (const failure of scoring.failures) {
@@ -421,7 +423,9 @@ export async function runUserMatchAndNotify(
     }
   }
 
-  const digestJobs = chooseDigestJobs(scoring.scored, options.thresholds);
+  const digestJobs = chooseDigestJobs(scoring.scored, thresholds, {
+    preferUsBased: options.profile.preferences.preferUsBased,
+  });
 
   if (!options.dryRun) {
     const digestBase = {

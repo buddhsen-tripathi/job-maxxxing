@@ -18,8 +18,8 @@ describe("recommendationForScore", () => {
   it("maps scores to recommendations using thresholds", () => {
     expect(recommendationForScore(91)).toBe("strong_match");
     expect(recommendationForScore(85)).toBe("strong_match");
-    expect(recommendationForScore(70)).toBe("review");
-    expect(recommendationForScore(69)).toBe("skip");
+    expect(recommendationForScore(60)).toBe("review");
+    expect(recommendationForScore(59)).toBe("skip");
     expect(recommendationForScore(60, { strongMatch: 50, review: 40 })).toBe("strong_match");
   });
 });
@@ -117,7 +117,7 @@ describe("chooseDigestJobs", () => {
         evidence: [],
       },
     });
-    const digest = chooseDigestJobs([mk(60), mk(90), mk(75)]);
+    const digest = chooseDigestJobs([mk(50), mk(90), mk(75)]);
     expect(digest.map((d) => d.score.totalScore)).toEqual([90, 75]);
   });
 });

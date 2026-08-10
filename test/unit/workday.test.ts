@@ -20,6 +20,7 @@ const preferences = {
   excludedCompanies: [],
   requiredKeywords: [],
   excludedKeywords: [],
+  preferUsBased: true,
 } satisfies SearchPreferences;
 
 const entry = {

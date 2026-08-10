@@ -64,7 +64,8 @@
     "minimumSalary": 150000,
     "excludedCompanies": ["Example Spammy Staffing LLC"],
     "requiredKeywords": [],
-    "excludedKeywords": ["clearance", "unpaid"]
+    "excludedKeywords": ["clearance", "unpaid"],
+    "preferUsBased": true
   },
   "answers": {
     "work_authorization": {

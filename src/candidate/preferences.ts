@@ -12,6 +12,7 @@ export const SearchPreferencesSchema = z.object({
   excludedCompanies: z.array(z.string()).default([]),
   requiredKeywords: z.array(z.string()).default([]),
   excludedKeywords: z.array(z.string()).default([]),
+  preferUsBased: z.boolean().default(true),
 });
 
 export type SearchPreferences = z.infer<typeof SearchPreferencesSchema>;

@@ -18,6 +18,7 @@ const preferences = {
   excludedCompanies: [],
   requiredKeywords: [],
   excludedKeywords: [],
+  preferUsBased: true,
 } satisfies SearchPreferences;
 
 const json = (body: unknown, status = 200) =>

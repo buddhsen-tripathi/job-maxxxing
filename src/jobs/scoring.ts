@@ -6,13 +6,14 @@ import { SCORING_PROMPT_VERSION } from "../llm/prompts";
 import { type JobScore, JobScoreSchema } from "../llm/schemas";
 import { errorMessage } from "../shared/errors";
 import { mapWithConcurrency } from "../shared/http";
+import { isLikelyUsJob } from "./location";
 
 export interface ScoreThresholds {
   strongMatch: number;
   review: number;
 }
 
-export const DEFAULT_THRESHOLDS: ScoreThresholds = { strongMatch: 85, review: 70 };
+export const DEFAULT_THRESHOLDS: ScoreThresholds = { strongMatch: 85, review: 60 };
 
 export function recommendationForScore(
   totalScore: number,
@@ -30,7 +31,11 @@ export class ScoreValidationError extends Error {
   }
 }
 
-export function validateScore(raw: unknown, profile: CandidateProfile): JobScore {
+export function validateScore(
+  raw: unknown,
+  profile: CandidateProfile,
+  thresholds: ScoreThresholds = DEFAULT_THRESHOLDS,
+): JobScore {
   const parsed = JobScoreSchema.safeParse(raw);
   if (!parsed.success) {
     throw new ScoreValidationError(`Score failed schema validation: ${parsed.error.message}`);
@@ -44,7 +49,7 @@ export function validateScore(raw: unknown, profile: CandidateProfile): JobScore
       );
     }
   }
-  const expectedRecommendation = recommendationForScore(score.totalScore);
+  const expectedRecommendation = recommendationForScore(score.totalScore, thresholds);
   if (score.recommendation !== expectedRecommendation) {
     throw new ScoreValidationError(
       `Recommendation "${score.recommendation}" inconsistent with totalScore ${score.totalScore}`,
@@ -57,12 +62,19 @@ export async function scoreJob(
   client: LlmClient,
   job: JobRow,
   profile: CandidateProfile,
+  thresholds: ScoreThresholds = DEFAULT_THRESHOLDS,
 ): Promise<JobScore> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const raw = await client.scoreJob({ job, profile, promptVersion: SCORING_PROMPT_VERSION });
+    const raw = await client.scoreJob({
+      job,
+      profile,
+      promptVersion: SCORING_PROMPT_VERSION,
+      thresholds,
+      preferUsBased: profile.preferences.preferUsBased,
+    });
     try {
-      return validateScore(raw, profile);
+      return validateScore(raw, profile, thresholds);
     } catch (error) {
       lastError = error;
     }
@@ -90,6 +102,7 @@ export async function scoreJobs(
     client: LlmClient;
     profile: CandidateProfile;
     concurrency?: number;
+    thresholds?: ScoreThresholds;
   },
 ): Promise<ScoringOutcome> {
   const results = await mapWithConcurrency(
@@ -97,7 +110,12 @@ export async function scoreJobs(
     options.concurrency ?? LLM_CONCURRENCY,
     async (job) => {
       try {
-        const score = await scoreJob(options.client, job, options.profile);
+        const score = await scoreJob(
+          options.client,
+          job,
+          options.profile,
+          options.thresholds ?? DEFAULT_THRESHOLDS,
+        );
         return { scored: { job, score } as ScoredJob, failure: null };
       } catch (error) {
         return {
@@ -138,8 +156,16 @@ export async function getScoredJob(db: D1Database, jobId: string): Promise<Score
 export function chooseDigestJobs(
   scored: readonly ScoredJob[],
   thresholds: ScoreThresholds = DEFAULT_THRESHOLDS,
+  options: { preferUsBased?: boolean } = {},
 ): ScoredJob[] {
-  return scored
-    .filter(({ score }) => score.totalScore >= thresholds.review)
-    .sort((a, b) => b.score.totalScore - a.score.totalScore);
+  const eligible = scored.filter(({ score }) => score.totalScore >= thresholds.review);
+  if (!options.preferUsBased) {
+    return eligible.sort((a, b) => b.score.totalScore - a.score.totalScore);
+  }
+  return eligible.sort((a, b) => {
+    const usA = isLikelyUsJob({ location: a.job.location, workplaceType: a.job.workplace_type });
+    const usB = isLikelyUsJob({ location: b.job.location, workplaceType: b.job.workplace_type });
+    if (usA !== usB) return usA ? -1 : 1;
+    return b.score.totalScore - a.score.totalScore;
+  });
 }

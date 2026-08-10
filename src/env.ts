@@ -15,4 +15,7 @@ export interface Env {
   ADMIN_TOKEN?: string;
   SOURCES_JSON?: string;
   CANDIDATE_PROFILE_JSON?: string;
+
+  SCORE_STRONG_MATCH_THRESHOLD?: string;
+  SCORE_REVIEW_THRESHOLD?: string;
 }

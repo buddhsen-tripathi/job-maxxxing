@@ -83,7 +83,13 @@ export function createOpenAiCompatibleClient(options: {
   return {
     model: options.model,
     scoreJob: (request: ScoreJobRequest) =>
-      chatCompletion(config, buildScoringMessages(request.job, request.profile)),
+      chatCompletion(
+        config,
+        buildScoringMessages(request.job, request.profile, {
+          ...(request.thresholds ? { thresholds: request.thresholds } : {}),
+          ...(request.preferUsBased !== undefined ? { preferUsBased: request.preferUsBased } : {}),
+        }),
+      ),
     answerQuestion: (request: AnswerQuestionRequest) =>
       chatCompletion(config, buildAnswerMessages(request.question, request.job, request.profile)),
   };

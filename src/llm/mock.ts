@@ -35,7 +35,12 @@ export function deterministicScore(job: JobRow, profile: CandidateProfile): JobS
     profile.experience.evidence.length === 0 ? 0 : Math.round(evidenceRatio * 10);
 
   const totalScore = technicalScore + experienceScore + domainScore + locationScore + evidenceScore;
-  const recommendation = totalScore >= 85 ? "strong_match" : totalScore >= 70 ? "review" : "skip";
+  const recommendation =
+    totalScore >= 85
+      ? ("strong_match" as const)
+      : totalScore >= 60
+        ? ("review" as const)
+        : ("skip" as const);
 
   return {
     technicalScore,
@@ -71,7 +76,16 @@ export function createMockLlmClient(
       }
       const next = scripted.shift();
       if (next !== undefined) return next;
-      return deterministicScore(request.job, request.profile);
+      const score = deterministicScore(request.job, request.profile);
+      const strong = request.thresholds?.strongMatch ?? 85;
+      const review = request.thresholds?.review ?? 60;
+      score.recommendation =
+        score.totalScore >= strong
+          ? "strong_match"
+          : score.totalScore >= review
+            ? "review"
+            : "skip";
+      return score;
     },
   };
   return client;

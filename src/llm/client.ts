@@ -5,6 +5,8 @@ export interface ScoreJobRequest {
   job: JobRow;
   profile: CandidateProfile;
   promptVersion: string;
+  thresholds?: { strongMatch: number; review: number };
+  preferUsBased?: boolean;
 }
 
 export interface AnswerQuestionRequest {
