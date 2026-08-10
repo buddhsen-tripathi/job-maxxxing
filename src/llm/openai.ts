@@ -1,6 +1,12 @@
+import { buildProfileExtractMessages } from "../candidate/extract-profile";
 import { AppError, errorMessage } from "../shared/errors";
 import { fetchWithTimeout } from "../shared/http";
-import type { AnswerQuestionRequest, LlmClient, ScoreJobRequest } from "./client";
+import type {
+  AnswerQuestionRequest,
+  ExtractProfileRequest,
+  LlmClient,
+  ScoreJobRequest,
+} from "./client";
 import { buildAnswerMessages, buildScoringMessages } from "./prompts";
 
 interface ChatCompletionResponse {
@@ -37,7 +43,7 @@ async function chatCompletion(
         ],
       }),
     },
-    30_000,
+    45_000,
   );
   if (!response.ok) {
     throw new AppError("llm_http_error", `LLM API returned HTTP ${response.status}`);
@@ -92,6 +98,8 @@ export function createOpenAiCompatibleClient(options: {
       ),
     answerQuestion: (request: AnswerQuestionRequest) =>
       chatCompletion(config, buildAnswerMessages(request.question, request.job, request.profile)),
+    extractProfile: (request: ExtractProfileRequest) =>
+      chatCompletion(config, buildProfileExtractMessages(request.resumeText)),
   };
 }
 

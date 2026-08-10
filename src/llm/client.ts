@@ -16,10 +16,15 @@ export interface AnswerQuestionRequest {
   promptVersion: string;
 }
 
+export interface ExtractProfileRequest {
+  resumeText: string;
+}
+
 export interface LlmClient {
   readonly model: string;
   scoreJob(request: ScoreJobRequest): Promise<unknown>;
   answerQuestion?(request: AnswerQuestionRequest): Promise<unknown>;
+  extractProfile?(request: ExtractProfileRequest): Promise<unknown>;
 }
 
 export class LlmOutputInvalidError extends Error {

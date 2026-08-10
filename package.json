@@ -2,6 +2,7 @@
   "name": "job-maxxing",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "hono": "^4.8.2",
+    "unpdf": "^1.8.0",
     "zod": "^3.25.67"
   },
   "trustedDependencies": [
