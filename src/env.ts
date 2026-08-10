@@ -18,6 +18,8 @@ export interface Env {
 
   SCORE_STRONG_MATCH_THRESHOLD?: string;
   SCORE_REVIEW_THRESHOLD?: string;
+  /** Max jobs LLM-scored per user per cron tick (default 20). */
+  SCORE_CAP_PER_USER?: string;
 
   /** Boards polled per cron tick (default 48). */
   BOARD_INGEST_BATCH_SIZE?: string;

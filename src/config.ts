@@ -20,7 +20,8 @@ import { type SourceEntry, SourcesConfigSchema } from "./sources/source-adapter"
 const SecretsSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1),
-  TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1),
+  /** Optional operator chat for legacy default user + admin ping fallback. */
+  TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1).optional(),
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_MODEL: z.string().min(1),
 });
@@ -49,7 +50,9 @@ export function parseSecrets(env: Env): Secrets {
   const result = SecretsSchema.safeParse({
     TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET: env.TELEGRAM_WEBHOOK_SECRET,
-    TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID,
+    ...(env.TELEGRAM_ALLOWED_CHAT_ID
+      ? { TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID }
+      : {}),
     OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
     OPENROUTER_MODEL: env.OPENROUTER_MODEL,
   });
@@ -63,7 +66,7 @@ export function parseSecrets(env: Env): Secrets {
 const TelegramSecretsSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1),
-  TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1),
+  TELEGRAM_ALLOWED_CHAT_ID: z.string().min(1).optional(),
 });
 
 export type TelegramSecrets = z.infer<typeof TelegramSecretsSchema>;
@@ -72,7 +75,9 @@ export function parseTelegramSecrets(env: Env): TelegramSecrets {
   const result = TelegramSecretsSchema.safeParse({
     TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET: env.TELEGRAM_WEBHOOK_SECRET,
-    TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID,
+    ...(env.TELEGRAM_ALLOWED_CHAT_ID
+      ? { TELEGRAM_ALLOWED_CHAT_ID: env.TELEGRAM_ALLOWED_CHAT_ID }
+      : {}),
   });
   if (!result.success) {
     const missing = result.error.issues.map((i) => i.path.join(".")).join(", ");
@@ -166,7 +171,7 @@ async function readLegacyProfile(env: Env): Promise<CandidateProfile | null> {
 export async function ensureDefaultUserProfile(env: Env): Promise<void> {
   let telegramChatId: string | null = null;
   try {
-    telegramChatId = parseTelegramSecrets(env).TELEGRAM_ALLOWED_CHAT_ID;
+    telegramChatId = parseTelegramSecrets(env).TELEGRAM_ALLOWED_CHAT_ID ?? null;
   } catch {
     // optional during dry runs / tests without telegram
   }

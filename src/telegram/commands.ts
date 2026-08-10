@@ -1,6 +1,6 @@
-import { getLatestScoreForJob, listJobs } from "../db/repositories/jobs";
+import { listUserJobsByStatus } from "../db/repositories/user-jobs";
 import type { TelegramClient } from "./client";
-import { renderHelp, renderJobListItem, renderJobListSummary } from "./digest";
+import { renderHelp, renderJobLinkList } from "./digest";
 
 export type BotCommand =
   | { type: "help" }
@@ -22,6 +22,8 @@ export function parseBotCommand(text: string): BotCommand | null {
       return { type: "help" };
     case "shortlist":
     case "shortlists":
+    case "saved":
+    case "links":
       return { type: "shortlists" };
     case "skipped":
     case "skip":
@@ -31,24 +33,20 @@ export function parseBotCommand(text: string): BotCommand | null {
   }
 }
 
-const LIST_LIMIT = 15;
+const LIST_LIMIT = 40;
 
-async function sendJobStatusList(
+async function sendJobLinkList(
   db: D1Database,
   client: TelegramClient,
   chatId: string,
+  userId: string,
   status: "shortlisted" | "skipped",
 ): Promise<void> {
-  const jobs = await listJobs(db, { status, limit: LIST_LIMIT });
+  const jobs = await listUserJobsByStatus(db, userId, status, LIST_LIMIT);
   await client.sendMessage({
     chatId,
-    text: renderJobListSummary(status, jobs.length),
+    text: renderJobLinkList(status, jobs),
   });
-  for (const [index, job] of jobs.entries()) {
-    const score = await getLatestScoreForJob(db, job.id);
-    const card = renderJobListItem(index + 1, job, score?.total_score ?? null);
-    await client.sendMessage({ chatId, text: card.text, buttons: card.buttons });
-  }
 }
 
 export async function handleBotCommand(
@@ -56,6 +54,7 @@ export async function handleBotCommand(
   client: TelegramClient,
   chatId: string,
   text: string,
+  options: { userId: string },
 ): Promise<{ handled: boolean }> {
   const command = parseBotCommand(text);
   if (!command) return { handled: false };
@@ -65,10 +64,10 @@ export async function handleBotCommand(
       await client.sendMessage({ chatId, text: renderHelp() });
       return { handled: true };
     case "shortlists":
-      await sendJobStatusList(db, client, chatId, "shortlisted");
+      await sendJobLinkList(db, client, chatId, options.userId, "shortlisted");
       return { handled: true };
     case "skipped":
-      await sendJobStatusList(db, client, chatId, "skipped");
+      await sendJobLinkList(db, client, chatId, options.userId, "skipped");
       return { handled: true };
     case "unknown":
       await client.sendMessage({
@@ -80,7 +79,10 @@ export async function handleBotCommand(
 }
 
 export const BOT_COMMANDS = [
-  { command: "shortlists", description: "Show shortlisted jobs" },
-  { command: "skipped", description: "Show skipped jobs" },
-  { command: "help", description: "How to use the bot" },
+  { command: "start", description: "Start or restart onboarding" },
+  { command: "saved", description: "List saved jobs with apply links" },
+  { command: "skipped", description: "List skipped jobs with apply links" },
+  { command: "status", description: "Show onboarding / account status" },
+  { command: "restart", description: "Rebuild profile from a new resume" },
+  { command: "help", description: "Show how to use the bot" },
 ] as const;

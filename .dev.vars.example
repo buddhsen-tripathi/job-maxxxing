@@ -1,5 +1,6 @@
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_SECRET=
+# Optional: your Telegram chat id (binds to user `default` + admin ping)
 TELEGRAM_ALLOWED_CHAT_ID=
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4o-mini

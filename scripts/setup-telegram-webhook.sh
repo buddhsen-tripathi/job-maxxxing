@@ -23,11 +23,14 @@ curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommand
   -H "Content-Type: application/json" \
   -d '{
     "commands": [
-      {"command": "shortlists", "description": "Show shortlisted jobs"},
-      {"command": "skipped", "description": "Show skipped jobs"},
-      {"command": "help", "description": "How to use the bot"}
+      {"command": "start", "description": "Start or restart onboarding"},
+      {"command": "saved", "description": "List saved jobs with apply links"},
+      {"command": "skipped", "description": "List skipped jobs with apply links"},
+      {"command": "status", "description": "Show onboarding / account status"},
+      {"command": "restart", "description": "Rebuild profile from a new resume"},
+      {"command": "help", "description": "Show how to use the bot"}
     ]
   }'
 
 echo
-echo "Bot command menu registered (/shortlists, /skipped, /help)"
+echo "Bot command menu registered"

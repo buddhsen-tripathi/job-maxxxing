@@ -8,7 +8,7 @@ export function verifyTelegramSecret(env: Env, headers: Headers): boolean {
   return headers.get(SECRET_HEADER) === expected;
 }
 
-export function isAllowedChat(env: Env, chatId: string | number | undefined): boolean {
-  if (chatId === undefined) return false;
-  return String(chatId) === String(env.TELEGRAM_ALLOWED_CHAT_ID ?? "");
+/** Open bot: any chat with an id is accepted. Operator allowlist is optional elsewhere. */
+export function isAllowedChat(_env: Env, chatId: string | number | undefined): boolean {
+  return chatId !== undefined && String(chatId).length > 0;
 }

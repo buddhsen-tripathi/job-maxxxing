@@ -11,20 +11,40 @@ export function renderHelp(): string {
   return [
     "<b>job-maxxing</b>",
     "",
-    "Cron digests surface matching roles. Use the buttons on each card, or:",
+    "Open the bot, send a public resume URL (or PDF), set preferences, then get digests ~every 3 hours.",
     "",
-    "/shortlists — jobs you shortlisted",
-    "/skipped — jobs you skipped",
-    "/help — this message",
+    "/start — begin onboarding",
+    "/saved — list saved jobs with apply links",
+    "/skipped — list skipped jobs with apply links",
+    "/status — onboarding status",
+    "/restart — rebuild profile from a new resume",
+    "/help — show this message",
     "",
-    "Shortlist bookmarks a role. Prepare drafts answers — nothing is auto-submitted.",
+    "Save bookmarks a role. Prepare drafts answers — nothing is auto-submitted.",
   ].join("\n");
 }
 
 export function renderJobListSummary(status: "shortlisted" | "skipped", count: number): string {
-  const label = status === "shortlisted" ? "Shortlisted" : "Skipped";
+  const label = status === "shortlisted" ? "Saved" : "Skipped";
   if (count === 0) return `<b>${label}</b>\n\nNone yet.`;
   return `<b>${label}</b> — ${count} job${count === 1 ? "" : "s"}`;
+}
+
+/** Compact one-message list of jobs with clickable apply links. */
+export function renderJobLinkList(
+  status: "shortlisted" | "skipped",
+  jobs: ReadonlyArray<Pick<JobRow, "title" | "company" | "apply_url" | "location">>,
+): string {
+  const header = renderJobListSummary(status, jobs.length);
+  if (jobs.length === 0) return header;
+  const lines = [header, ""];
+  for (const [index, job] of jobs.entries()) {
+    const loc = job.location ? ` — ${escapeHtml(job.location)}` : "";
+    lines.push(
+      `${index + 1}. <a href="${escapeHtml(job.apply_url)}">${escapeHtml(job.title)}</a> @ ${escapeHtml(job.company)}${loc}`,
+    );
+  }
+  return lines.join("\n").slice(0, 4000);
 }
 
 export function renderJobListItem(
@@ -51,7 +71,7 @@ export function renderJobListItem(
   if (job.status === "shortlisted") {
     buttons.push([{ text: "Skip", callbackData: `job:skip:${job.id}` }]);
   } else if (job.status === "skipped") {
-    buttons.push([{ text: "Shortlist", callbackData: `job:shortlist:${job.id}` }]);
+    buttons.push([{ text: "Save", callbackData: `job:shortlist:${job.id}` }]);
   }
   return { text, buttons };
 }
@@ -118,7 +138,7 @@ export function renderJobCard(
   const buttons: InlineButton[][] = [
     [
       { text: "Review", callbackData: `job:review:${job.id}` },
-      { text: "Shortlist", callbackData: `job:shortlist:${job.id}` },
+      { text: "Save", callbackData: `job:shortlist:${job.id}` },
       { text: "Skip", callbackData: `job:skip:${job.id}` },
     ],
     [
@@ -159,7 +179,7 @@ export function renderReviewCard(scored: ScoredJob): {
   const buttons: InlineButton[][] = [
     [{ text: "Prepare application", callbackData: `job:prepare:${job.id}` }],
     [
-      { text: "Shortlist", callbackData: `job:shortlist:${job.id}` },
+      { text: "Save", callbackData: `job:shortlist:${job.id}` },
       { text: "Skip", callbackData: `job:skip:${job.id}` },
     ],
     [

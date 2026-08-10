@@ -96,8 +96,12 @@ export const admin = new Hono<{ Bindings: Env }>()
       return c.json({ error: "telegram_not_configured" }, 503);
     }
     const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
+    const chatId = secrets.TELEGRAM_ALLOWED_CHAT_ID;
+    if (!chatId) {
+      return c.json({ error: "TELEGRAM_ALLOWED_CHAT_ID not set (operator chat)" }, 400);
+    }
     const message = await client.sendMessage({
-      chatId: secrets.TELEGRAM_ALLOWED_CHAT_ID,
+      chatId,
       text: "job-maxxing test message — Telegram is configured correctly.",
     });
     return c.json({ ok: true, messageId: message.messageId });
