@@ -1,17 +1,36 @@
 # job-maxxing
 
 Personal job-search agent on Cloudflare Workers. Polls public ATS boards
-(Greenhouse, Lever, Ashby) every 3 hours, upserts new jobs into D1, scores them
-against a verified candidate profile with an LLM, and sends a Telegram digest.
-Applications are prepared on demand but **never submitted** — every
-consequential action requires explicit human approval.
+(Greenhouse, Lever, Ashby, Workday), upserts new roles into D1, hard-filters and
+LLM-scores them against each user’s candidate profile, and sends a Telegram digest
+every **3 hours**. Anyone can DM the bot, upload a resume URL (or PDF), set
+preferences, and receive matches. Applications can be **prepared** for review but
+are **never auto-submitted**.
+
+Live worker: `https://YOUR_SUBDOMAIN.workers.dev`
+
+## How it works
+
+```text
+Cron (0 */3 * * *)
+  → ingest shard of ats_boards (priority reserve + stale standard fill)
+  → upsert jobs by fingerprint (only new jobs continue)
+  → hard filters (location, YOE, title, employment type, …)
+  → OpenRouter LLM score
+  → Telegram digest per active user for matches ≥ review threshold
+```
+
+Anyone who DMs the bot can onboard: send a **public resume URL** (PDF/text/HTML)
+or upload a **PDF**, answer preference prompts, then receive digests. Use **Save** /
+Skip / Review / Prepare on cards. `/saved` lists your saved jobs with apply links.
 
 ## Stack
 
 - Cloudflare Workers + Hono + TypeScript (strict), Bun
-- D1 (SQLite), Cron Trigger `0 */3 * * *` (every 3 hours UTC, 8 runs/day)
-- Telegram Bot API over fetch, LLM scoring via OpenRouter (OpenAI-compatible API)
-- Vitest via `@cloudflare/vitest-pool-workers`, Biome, Wrangler
+- D1 (SQLite), cron `0 */3 * * *` (8 runs/day UTC)
+- Telegram Bot API (webhook + slash commands)
+- LLM scoring via [OpenRouter](https://openrouter.ai/)
+- Vitest (`@cloudflare/vitest-pool-workers`), Biome, Wrangler
 
 ## Local setup
 
@@ -25,50 +44,84 @@ bun run dev                      # http://localhost:8787
 ## Commands
 
 ```sh
-bun run dev        # local worker
-bun run test       # unit + integration + e2e smoke
-bun run typecheck  # tsc --noEmit
-bun run lint       # biome check
-bun run deploy     # wrangler deploy
+bun run dev          # local worker
+bun run test         # unit + integration + e2e
+bun run typecheck    # tsc --noEmit
+bun run lint         # biome check
+bun run deploy       # wrangler deploy
+bun run import:ats -- --remote   # bulk-import ~9.9k ATS boards into D1
 ```
 
 ## Configuration
 
-Secrets (set with `bunx wrangler secret put <NAME>` in production, `.dev.vars` locally):
+### Secrets
+
+Set with `bunx wrangler secret put <NAME>` in production, or `.dev.vars` locally:
 
 | Name | Purpose |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Random string; verified on every webhook call |
-| `TELEGRAM_ALLOWED_CHAT_ID` | Your personal chat ID (allowlist / default user) |
-| `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai/keys) API key |
-| `OPENROUTER_MODEL` | OpenRouter model id (e.g. `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`) |
+| `TELEGRAM_ALLOWED_CHAT_ID` | Optional operator chat id (binds to user `default`; used for admin Telegram ping) |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `OPENROUTER_MODEL` | Model id (e.g. `deepseek/deepseek-v4-flash-0731`) |
 | `ADMIN_TOKEN` | Bearer token for `/api/admin/*` |
 
-Optional tuning vars (Wrangler `vars`, not secrets):
+### Wrangler vars (non-secret)
 
 | Name | Default | Purpose |
 | --- | --- | --- |
-| `SCORE_STRONG_MATCH_THRESHOLD` | `85` | Total score (0-100) for "strong match" |
-| `SCORE_REVIEW_THRESHOLD` | `60` | Minimum total score to appear in the digest |
+| `ENVIRONMENT` | — | `development` or `production` |
+| `APP_BASE_URL` | — | Public worker URL (webhook + OpenRouter headers) |
+| `BOARD_INGEST_BATCH_SIZE` | `48` | Boards polled per cron tick |
+| `BOARD_PRIORITY_CAP` | `16` | Max priority boards reserved each tick |
+| `SCORE_STRONG_MATCH_THRESHOLD` | `85` | Score for “strong match” |
+| `SCORE_REVIEW_THRESHOLD` | `60` | Minimum score to appear in the digest |
+| `SCORE_CAP_PER_USER` | `20` | Max LLM-scored jobs per user per cron tick |
 
-US-based roles are prioritized by default (`preferUsBased` in the candidate
-profile): the scoring prompt rewards US locations and the digest sorts
-US-based matches first, then by score.
+US-based roles are prioritized when `preferUsBased` is set on the candidate
+profile (scoring prompt + digest sort).
 
-### Board catalog (production)
+`SOURCES_JSON` is an optional **fallback** when `ats_boards` is empty
+(tests/local). Prefer the D1 catalog in production. See `sources.example.json`.
 
-Discovery sources live in D1 table `ats_boards` (not Wrangler secrets). Migration
-`0005_ats_boards_and_users.sql` seeds a **priority** set of Greenhouse / Lever /
-Ashby boards (large tech, AI, fintech, consumer, infra) plus a smaller
-**standard** rotation pool.
+### Candidate profile
 
-Each cron tick:
+Each Telegram user maps to a D1 `users` row (`tg:<chat_id>`, or `default` for the
+optional operator chat). Profiles live in `user_profiles`. New users stay inactive
+until onboarding finishes (`/start` → resume → preferences).
 
-1. Polls **all active `tier=priority` boards**
-2. Plus the next N least-recently-polled **standard** boards (`last_polled_at` round-robin)
-3. Upserts jobs; only new fingerprints proceed to matching
-4. Matches / scores / notifies each active `users` + `user_profiles` row
+The seeded `default` user can still be hydrated from `app_config.candidate_profile`
+or `CANDIDATE_PROFILE_JSON` for local/ops use. Profile JSON is too large for
+Wrangler secrets (~5KB cap) — keep it in D1.
+
+## Board catalog
+
+Discovery sources live in D1 `ats_boards` (`greenhouse` | `lever` | `ashby` |
+`workday`).
+
+- Migrations seed a small **priority** set of well-known companies.
+- Production typically also imports the open
+  [LastRound ATS directory](https://github.com/fyrosofttech/lastroundai-hiring-data)
+  (~9.9k Greenhouse / Lever / Ashby boards, CC BY 4.0):
+
+```sh
+bun scripts/import-ats-directory.ts --remote
+```
+
+Import upserts rows as `tier=standard` while **preserving** existing `priority`
+and manually deactivated boards.
+
+### Polling shard (each cron tick)
+
+1. Take up to `BOARD_PRIORITY_CAP` least-recently-polled **priority** boards
+2. Fill remaining `BOARD_INGEST_BATCH_SIZE` slots with least-recent **active**
+   boards (mostly standard)
+3. Upsert jobs; only **new fingerprints** go to filter → score → notify
+4. Notify each active `users` / `user_profiles` row
+
+At 8 ticks/day × ~32 standard slots ≈ **250 boards/day** → a 10k catalog rotates
+in roughly **5–6 weeks**. Promote high-yield boards to `priority`.
 
 Add or update a board without redeploying:
 
@@ -85,45 +138,62 @@ curl -X POST https://<worker>.workers.dev/api/admin/boards \
   }'
 ```
 
-`SOURCES_JSON` remains a **fallback** for local/tests when `ats_boards` is empty
-(see `sources.example.json`). Production should use the D1 catalog.
+Workday boards use slug form `host/tenant/site` (see migration `0006`).
 
-### Candidate profile
+## Telegram
 
-Prefer D1 `user_profiles` for user `default` (multi-tenant-ready). On first run the
-worker migrates from `app_config.candidate_profile` or `CANDIDATE_PROFILE_JSON`
-into `user_profiles` if needed.
+Register webhook + command menu after deploy:
 
-## Production deployment (from a clean checkout)
+```sh
+TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... \
+  APP_BASE_URL=https://<worker>.workers.dev \
+  ./scripts/setup-telegram-webhook.sh
+```
+
+Slash commands (also in the bot menu):
+
+| Command | What it does |
+| --- | --- |
+| `/saved` | List saved jobs with clickable apply links |
+| `/skipped` | List skipped jobs with apply links |
+| `/help` | Show how to use the bot |
+
+Digest / review buttons: **Save**, Skip, Review, Prepare, Open listing.
+Save bookmarks a role; Prepare drafts answers — nothing is auto-submitted.
+
+## Production deployment
 
 ```sh
 bun install
 
-# 1. Create the database and copy the printed database_id into wrangler.jsonc
+# 1. Create DB; put database_id in wrangler.jsonc
 bunx wrangler d1 create job-maxxing
 
-# 2. Apply migrations (creates schema + seeds ats_boards + default user)
+# 2. Apply migrations
 bunx wrangler d1 migrations apply job-maxxing --remote
 
-# 3. Set secrets (SOURCES_JSON optional — prefer D1 catalog)
+# 3. Secrets
 for s in TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_ALLOWED_CHAT_ID \
          OPENROUTER_API_KEY OPENROUTER_MODEL ADMIN_TOKEN; do
   bunx wrangler secret put $s
 done
 
-# 4. Store candidate profile in D1 (secrets are capped ~5KB)
+# 4. Candidate profile in D1 (not a Wrangler secret)
 bunx wrangler d1 execute job-maxxing --remote --command \
   "INSERT INTO app_config (key, value_json, updated_at) VALUES ('candidate_profile', '$(jq -c . candidate-profile.json)', datetime('now'))
    ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at"
 
-# 5. Set APP_BASE_URL / ENVIRONMENT=production in wrangler.jsonc vars, then deploy
+# 5. Optional: full ATS directory (~10k boards)
+bun scripts/import-ats-directory.ts --remote
+
+# 6. Deploy (set APP_BASE_URL / ENVIRONMENT in wrangler.jsonc vars)
 bun run deploy
 
-# 6. Register the Telegram webhook
+# 7. Telegram webhook + command menu
 TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... APP_BASE_URL=https://<worker>.workers.dev \
   ./scripts/setup-telegram-webhook.sh
 
-# 7. Smoke check
+# 8. Smoke
 curl https://<worker>.workers.dev/health
 curl -X POST https://<worker>.workers.dev/api/admin/test-telegram \
   -H "Authorization: Bearer $ADMIN_TOKEN"
@@ -132,71 +202,45 @@ curl -X POST https://<worker>.workers.dev/api/admin/run-daily \
   -d '{"dryRun": true, "limit": 5}'
 ```
 
-The cron trigger then runs ingest + match every 3 hours UTC. A failed production
-run sends a safe Telegram error notice.
-
-## Growing coverage (toward consumer scale)
-
-The seed catalog is intentionally small. Production can ingest the open
-[LastRound ATS company directory](https://github.com/fyrosofttech/lastroundai-hiring-data)
-(~9.9k Greenhouse / Lever / Ashby boards, CC BY 4.0):
-
-```sh
-bun scripts/import-ats-directory.ts --remote
-```
-
-That upserts every board as `tier=standard` while **preserving** existing
-`priority` / manually deactivated rows. Polling then:
-
-1. Reserves up to `BOARD_PRIORITY_CAP` (default 16) least-recent priority boards
-2. Fills the rest of `BOARD_INGEST_BATCH_SIZE` (default 48) with the least-recent
-   active boards (mostly standard)
-
-At 8 cron ticks/day × ~32 standard slots ≈ **250 boards/day**, so a 10k catalog
-fully rotates in roughly **5–6 weeks**. Promote high-yield boards to `priority`.
-
-Also:
-
-1. Add boards via `POST /api/admin/boards` (or SQL upserts)
-2. Deactivate dead boards with `"active": false`
-3. When one Worker invocation cannot finish, raise concurrency carefully or add a
-   Cloudflare Queue of `board.poll` messages
-4. Cost guards: score only new jobs; hard filters before LLM; Greenhouse/Ashby
-   title prefilters cap detail volume
-
-Phase 1 keeps a single default operator but stores `users` / `user_profiles` so a
-second user does not require a schema rewrite. Auth/billing UI is intentionally
-out of scope until ingest+notify is stable.
+Failed production runs send a safe Telegram error notice.
 
 ## Operations
 
-- **Manual run**: `POST /api/admin/run-daily` (`{"dryRun": false}`). Returns
-  `202` and runs in the background by default; pass `"sync": true` to wait for
-  the summary. Only one non-dry run executes per **3-hour UTC slot** (run lock).
-- **Upsert board**: `POST /api/admin/boards` (see above).
-- **Cost/usage limits**: scoring only runs on new, filter-eligible jobs; use
-  `limit` in dry runs; LLM concurrency is capped; source concurrency is low.
-- **Backup/export**: `bunx wrangler d1 export job-maxxing --remote --output backup.sql`
-- **Recovery**: restore with `bunx wrangler d1 execute job-maxxing --remote --file backup.sql`.
-  Re-running a slot is safe — discovery and digests are idempotent; to force a
-  re-run, delete that slot's row in `run_locks`.
-- **Rollback**: `bunx wrangler rollback` (or redeploy a previous git commit).
-- **Logs**: `bunx wrangler tail` — structured JSON with runId/jobId/source,
-  never tokens or personal data.
+- **Manual run**: `POST /api/admin/run-daily` (`{"dryRun": false}`). Default
+  response is `202` (background). Pass `"sync": true` to wait for the summary.
+  Only one non-dry run per **3-hour UTC slot** (`run_locks`). To force a re-run
+  in the same slot, delete that slot’s row from `run_locks`.
+- **Check runs**: `GET /api/runs`
+- **Saved jobs**: Telegram `/saved`, or `GET /api/jobs?status=shortlisted`
+- **Upsert board**: `POST /api/admin/boards`
+- **Import catalog**: `bun scripts/import-ats-directory.ts --remote`
+- **Cost guards**: score only new filter-eligible jobs; title prefilters on
+  Greenhouse/Ashby; source concurrency capped
+- **Backup**: `bunx wrangler d1 export job-maxxing --remote --output backup.sql`
+- **Logs**: `bunx wrangler tail` — structured JSON; no tokens/PII
+
+Common hard-filter rejects (by design): `unsupported_location`,
+`experience_exceeds_tolerance`, `excluded_title`, `incompatible_employment_type`.
 
 ## API
 
 - `GET /health`
-- `POST /telegram/webhook` (Telegram only; secret header + chat allowlist)
-  - Slash commands: `/shortlists`, `/skipped`, `/help` (also `/start`)
-  - Inline buttons on digests: Review / Shortlist / Skip / Prepare / Open
-- `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/shortlist|skip|prepare`
+- `POST /telegram/webhook` — secret header + chat allowlist; callbacks + slash commands
+- `GET /api/jobs?status=…`, `GET /api/jobs/:id`
+- `POST /api/jobs/:id/shortlist|skip|prepare` — `shortlist` is the API name for **Save**
 - `GET /api/runs`, `GET /api/runs/:id`
-- `POST /api/admin/run-daily` (bearer auth, supports `dryRun`, `sourceNames`, `limit`)
-- `POST /api/admin/boards` (bearer auth, upsert ATS board catalog row)
-- `POST /api/admin/test-telegram` (bearer auth)
+- `POST /api/admin/run-daily` — `dryRun`, `sync`, `sourceNames`, `limit`
+- `POST /api/admin/boards` — upsert catalog row (`greenhouse`/`lever`/`ashby`/`workday`)
+- `POST /api/admin/test-telegram`
 
 ## Notes
 
-- The MVP never submits applications. Preparation distinguishes verified,
-  derived, and unknown answers; demographic questions stay unanswered.
+- Never auto-submits applications. Prepared answers are marked verified /
+  derived / unknown; demographic questions stay unanswered.
+- Schema is multi-tenant-ready (`users`, `user_profiles`) with a single default
+  operator in production today. Auth/billing UI is out of scope until
+  ingest + notify stay stable at catalog scale.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
