@@ -5,6 +5,8 @@ TELEGRAM_ALLOWED_CHAT_ID=
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4o-mini
 ADMIN_TOKEN=
+# Public worker URL for webhooks / OpenRouter referer — do not commit a real value
+APP_BASE_URL=http://localhost:8787
 # Optional fallback when D1 ats_boards is empty (tests/local). Prefer D1 catalog in prod.
 SOURCES_JSON=
 CANDIDATE_PROFILE_JSON=

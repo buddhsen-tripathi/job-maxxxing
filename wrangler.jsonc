@@ -17,7 +17,7 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
-    "APP_BASE_URL": "https://YOUR_SUBDOMAIN.workers.dev",
+    // Set APP_BASE_URL outside git (Dashboard vars or `wrangler secret put APP_BASE_URL`).
     "BOARD_INGEST_BATCH_SIZE": "48",
     "BOARD_PRIORITY_CAP": "16"
   },

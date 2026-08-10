@@ -7,8 +7,6 @@ every **3 hours**. Anyone can DM the bot, upload a resume URL (or PDF), set
 preferences, and receive matches. Applications can be **prepared** for review but
 are **never auto-submitted**.
 
-Live worker: `https://YOUR_SUBDOMAIN.workers.dev`
-
 ## How it works
 
 ```text
@@ -186,7 +184,8 @@ bunx wrangler d1 execute job-maxxing --remote --command \
 # 5. Optional: full ATS directory (~10k boards)
 bun scripts/import-ats-directory.ts --remote
 
-# 6. Deploy (set APP_BASE_URL / ENVIRONMENT in wrangler.jsonc vars)
+# 6. Deploy — set APP_BASE_URL outside git (Dashboard or secret), not in wrangler.jsonc
+#    echo 'https://YOUR_SUBDOMAIN.workers.dev' | bunx wrangler secret put APP_BASE_URL
 bun run deploy
 
 # 7. Telegram webhook + command menu
