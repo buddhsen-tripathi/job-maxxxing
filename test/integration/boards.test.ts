@@ -14,7 +14,7 @@ beforeEach(async () => {
 });
 
 describe("ats_boards repository", () => {
-  it("selects all priority boards plus least-recently-polled standard", async () => {
+  it("caps priority and fills remaining slots with stale standard boards", async () => {
     await upsertAtsBoard(db, {
       provider: "greenhouse",
       slug: "prio-a",
@@ -41,11 +41,30 @@ describe("ats_boards repository", () => {
     });
     await markBoardPolled(db, stdOld.id, "ok", new Date("2026-08-01T00:00:00.000Z"));
 
-    const selected = await selectBoardsForIngest(db, { standardBatchSize: 1 });
-    expect(selected.filter((b) => b.tier === "priority")).toHaveLength(2);
-    expect(selected.filter((b) => b.tier === "standard")).toHaveLength(1);
-    // Never-polled standard should come before the previously polled one
-    expect(selected.find((b) => b.tier === "standard")?.slug).toBe("std-new");
+    const selected = await selectBoardsForIngest(db, { batchSize: 3, priorityCap: 1 });
+    expect(selected).toHaveLength(3);
+    // One reserved priority, then fill remaining with least-recent (other priority + never-polled standard)
+    expect(selected.filter((b) => b.tier === "priority").length).toBeGreaterThanOrEqual(1);
+    expect(selected.some((b) => b.slug === "std-new")).toBe(true);
+    expect(selected.some((b) => b.slug === "std-old")).toBe(false);
+  });
+
+  it("preserves priority tier on standard upsert", async () => {
+    await upsertAtsBoard(db, {
+      provider: "ashby",
+      slug: "ramp",
+      companyName: "Ramp",
+      tier: "priority",
+    });
+    const again = await upsertAtsBoard(db, {
+      provider: "ashby",
+      slug: "ramp",
+      companyName: "Ramp Inc",
+      tier: "standard",
+      preservePriority: true,
+    });
+    expect(again.tier).toBe("priority");
+    expect(again.company_name).toBe("Ramp Inc");
   });
 
   it("maps boards to source entries", () => {

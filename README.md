@@ -137,17 +137,32 @@ run sends a safe Telegram error notice.
 
 ## Growing coverage (toward consumer scale)
 
-1. Keep adding boards via `POST /api/admin/boards` (or SQL upserts). Prefer public
-   ATS JSON APIs only — Greenhouse `boards-api`, Lever `api.lever.co`, Ashby
-   `api.ashbyhq.com/posting-api/job-board/{slug}`.
-2. Start new companies as `tier=standard`; promote to `priority` when they
-   consistently yield eng/AI roles.
-3. Import larger community slug lists over time; deactivate dead boards with
-   `"active": false`.
-4. When one Worker invocation cannot finish the priority set, shard further
-   (smaller priority subsets or a Cloudflare Queue of `board.poll` messages).
-5. Cost guards already in place: score only new jobs; hard title/YOE/sponsor
-   filters before LLM; Greenhouse/Ashby title prefilters cap detail volume.
+The seed catalog is intentionally small. Production can ingest the open
+[LastRound ATS company directory](https://github.com/fyrosofttech/lastroundai-hiring-data)
+(~9.9k Greenhouse / Lever / Ashby boards, CC BY 4.0):
+
+```sh
+bun scripts/import-ats-directory.ts --remote
+```
+
+That upserts every board as `tier=standard` while **preserving** existing
+`priority` / manually deactivated rows. Polling then:
+
+1. Reserves up to `BOARD_PRIORITY_CAP` (default 16) least-recent priority boards
+2. Fills the rest of `BOARD_INGEST_BATCH_SIZE` (default 48) with the least-recent
+   active boards (mostly standard)
+
+At 8 cron ticks/day × ~32 standard slots ≈ **250 boards/day**, so a 10k catalog
+fully rotates in roughly **5–6 weeks**. Promote high-yield boards to `priority`.
+
+Also:
+
+1. Add boards via `POST /api/admin/boards` (or SQL upserts)
+2. Deactivate dead boards with `"active": false`
+3. When one Worker invocation cannot finish, raise concurrency carefully or add a
+   Cloudflare Queue of `board.poll` messages
+4. Cost guards: score only new jobs; hard filters before LLM; Greenhouse/Ashby
+   title prefilters cap detail volume
 
 Phase 1 keeps a single default operator but stores `users` / `user_profiles` so a
 second user does not require a schema rewrite. Auth/billing UI is intentionally

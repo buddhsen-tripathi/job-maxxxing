@@ -3,6 +3,8 @@ import { type CandidateProfile, parseCandidateProfile } from "./candidate/profil
 import {
   boardToSourceEntry,
   countActiveAtsBoards,
+  DEFAULT_BOARD_BATCH_SIZE,
+  DEFAULT_PRIORITY_CAP,
   selectBoardsForIngest,
 } from "./db/repositories/boards";
 import { getAppConfigValue } from "./db/repositories/meta";
@@ -102,8 +104,17 @@ export function parseSourcesConfig(env: Env): SourceEntry[] {
 export interface LoadSourcesOptions {
   /** Force SOURCES_JSON even when D1 has boards (tests). */
   preferEnvSources?: boolean;
+  /** @deprecated Prefer batchSize. */
   standardBatchSize?: number;
+  batchSize?: number;
+  priorityCap?: number;
   sourceNames?: string[];
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 export async function loadSourcesForIngest(
@@ -113,11 +124,13 @@ export async function loadSourcesForIngest(
   const catalogCount = options.preferEnvSources ? 0 : await countActiveAtsBoards(env.DB);
 
   if (catalogCount > 0) {
-    const boards = await selectBoardsForIngest(env.DB, {
-      ...(options.standardBatchSize !== undefined
-        ? { standardBatchSize: options.standardBatchSize }
-        : {}),
-    });
+    const batchSize =
+      options.batchSize ??
+      options.standardBatchSize ??
+      parsePositiveInt(env.BOARD_INGEST_BATCH_SIZE, DEFAULT_BOARD_BATCH_SIZE);
+    const priorityCap =
+      options.priorityCap ?? parsePositiveInt(env.BOARD_PRIORITY_CAP, DEFAULT_PRIORITY_CAP);
+    const boards = await selectBoardsForIngest(env.DB, { batchSize, priorityCap });
     let entries = boards.map(boardToSourceEntry);
     if (options.sourceNames?.length) {
       entries = entries.filter((entry) => options.sourceNames?.includes(entry.source));

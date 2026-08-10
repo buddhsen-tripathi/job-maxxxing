@@ -17,7 +17,9 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
-    "APP_BASE_URL": "https://YOUR_SUBDOMAIN.workers.dev"
+    "APP_BASE_URL": "https://YOUR_SUBDOMAIN.workers.dev",
+    "BOARD_INGEST_BATCH_SIZE": "48",
+    "BOARD_PRIORITY_CAP": "16"
   },
   "observability": {
     "enabled": true

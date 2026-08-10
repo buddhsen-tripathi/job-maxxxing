@@ -4,6 +4,11 @@ import type { AtsBoardRow, AtsBoardTier, AtsProvider } from "../schema";
 
 export type { AtsBoardRow, AtsBoardTier, AtsProvider };
 
+/** Default boards polled per cron tick (priority reserve + standard fill). */
+export const DEFAULT_BOARD_BATCH_SIZE = 48;
+/** Max priority boards taken each tick so standard boards still rotate. */
+export const DEFAULT_PRIORITY_CAP = 16;
+
 export interface UpsertAtsBoardInput {
   id?: string;
   provider: AtsProvider;
@@ -13,6 +18,10 @@ export interface UpsertAtsBoardInput {
   active?: boolean;
   sector?: string | null;
   now?: Date;
+  /** When true, do not demote an existing priority board to standard. */
+  preservePriority?: boolean;
+  /** When true, leave manually deactivated boards inactive. */
+  preserveInactive?: boolean;
 }
 
 export function boardToSourceEntry(board: AtsBoardRow): SourceEntry {
@@ -51,6 +60,15 @@ export async function upsertAtsBoard(
 ): Promise<AtsBoardRow> {
   const now = nowIso(input.now);
   const id = input.id ?? newId();
+  const preservePriority = input.preservePriority === true;
+  const preserveInactive = input.preserveInactive === true;
+  const tierExpr = preservePriority
+    ? `CASE WHEN ats_boards.tier = 'priority' THEN ats_boards.tier ELSE excluded.tier END`
+    : `excluded.tier`;
+  const activeExpr = preserveInactive
+    ? `CASE WHEN ats_boards.active = 0 THEN 0 ELSE excluded.active END`
+    : `excluded.active`;
+
   await db
     .prepare(
       `INSERT INTO ats_boards (
@@ -58,9 +76,9 @@ export async function upsertAtsBoard(
        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
        ON CONFLICT(provider, slug) DO UPDATE SET
          company_name = excluded.company_name,
-         tier = excluded.tier,
-         active = excluded.active,
-         sector = excluded.sector,
+         tier = ${tierExpr},
+         active = ${activeExpr},
+         sector = COALESCE(excluded.sector, ats_boards.sector),
          updated_at = excluded.updated_at`,
     )
     .bind(
@@ -101,34 +119,64 @@ export async function listActiveAtsBoards(db: D1Database): Promise<AtsBoardRow[]
   return result.results;
 }
 
+export interface SelectBoardsOptions {
+  /** @deprecated Prefer batchSize — kept for call-site compatibility. */
+  standardBatchSize?: number;
+  batchSize?: number;
+  priorityCap?: number;
+}
+
 /**
- * Boards to poll this cycle: all active priority boards, plus the least-recently
- * polled standard boards (round-robin via last_polled_at).
+ * Boards to poll this cycle: up to `priorityCap` least-recently-polled priority
+ * boards, then fill remaining `batchSize` slots with the least-recently-polled
+ * active boards (mostly standard). This keeps priority hot while rotating a
+ * large standard catalog.
  */
 export async function selectBoardsForIngest(
   db: D1Database,
-  options: { standardBatchSize?: number } = {},
+  options: SelectBoardsOptions = {},
 ): Promise<AtsBoardRow[]> {
-  const standardBatchSize = options.standardBatchSize ?? 8;
+  const batchSize = options.batchSize ?? options.standardBatchSize ?? DEFAULT_BOARD_BATCH_SIZE;
+  const priorityCap = options.priorityCap ?? DEFAULT_PRIORITY_CAP;
+
   const priority = await db
     .prepare(
       `SELECT * FROM ats_boards
        WHERE active = 1 AND tier = 'priority'
-       ORDER BY company_name ASC`,
-    )
-    .all<AtsBoardRow>();
-
-  const standard = await db
-    .prepare(
-      `SELECT * FROM ats_boards
-       WHERE active = 1 AND tier = 'standard'
        ORDER BY last_polled_at IS NOT NULL, last_polled_at ASC, company_name ASC
        LIMIT ?`,
     )
-    .bind(standardBatchSize)
+    .bind(Math.min(priorityCap, batchSize))
     .all<AtsBoardRow>();
 
-  return [...priority.results, ...standard.results];
+  const remaining = Math.max(0, batchSize - priority.results.length);
+  if (remaining === 0) return priority.results;
+
+  if (priority.results.length === 0) {
+    const rest = await db
+      .prepare(
+        `SELECT * FROM ats_boards
+         WHERE active = 1
+         ORDER BY last_polled_at IS NOT NULL, last_polled_at ASC, company_name ASC
+         LIMIT ?`,
+      )
+      .bind(remaining)
+      .all<AtsBoardRow>();
+    return rest.results;
+  }
+
+  const placeholders = priority.results.map(() => "?").join(", ");
+  const rest = await db
+    .prepare(
+      `SELECT * FROM ats_boards
+       WHERE active = 1 AND id NOT IN (${placeholders})
+       ORDER BY last_polled_at IS NOT NULL, last_polled_at ASC, company_name ASC
+       LIMIT ?`,
+    )
+    .bind(...priority.results.map((b) => b.id), remaining)
+    .all<AtsBoardRow>();
+
+  return [...priority.results, ...rest.results];
 }
 
 export async function markBoardPolled(

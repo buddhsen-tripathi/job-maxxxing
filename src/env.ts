@@ -18,4 +18,9 @@ export interface Env {
 
   SCORE_STRONG_MATCH_THRESHOLD?: string;
   SCORE_REVIEW_THRESHOLD?: string;
+
+  /** Boards polled per cron tick (default 48). */
+  BOARD_INGEST_BATCH_SIZE?: string;
+  /** Max priority boards reserved each tick (default 16). */
+  BOARD_PRIORITY_CAP?: string;
 }

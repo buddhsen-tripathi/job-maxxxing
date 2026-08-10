@@ -103,6 +103,8 @@ export interface DailyRunOptions {
   /** Force SOURCES_JSON instead of D1 catalog (tests). */
   preferEnvSources?: boolean;
   standardBatchSize?: number;
+  batchSize?: number;
+  priorityCap?: number;
 }
 
 async function acquireRunLock(db: D1Database, slotKey: string, runId: string): Promise<boolean> {
@@ -223,6 +225,8 @@ export async function runBoardIngest(
 ): Promise<BoardIngestResult> {
   const loaded = await loadSourcesForIngest(env, {
     preferEnvSources: options.preferEnvSources === true,
+    ...(options.batchSize !== undefined ? { batchSize: options.batchSize } : {}),
+    ...(options.priorityCap !== undefined ? { priorityCap: options.priorityCap } : {}),
     ...(options.standardBatchSize !== undefined
       ? { standardBatchSize: options.standardBatchSize }
       : {}),
@@ -233,6 +237,8 @@ export async function runBoardIngest(
   let boardsByCompany = new Map<string, AtsBoardRow>();
   if (loaded.fromCatalog) {
     const boards = await selectBoardsForIngest(env.DB, {
+      ...(options.batchSize !== undefined ? { batchSize: options.batchSize } : {}),
+      ...(options.priorityCap !== undefined ? { priorityCap: options.priorityCap } : {}),
       ...(options.standardBatchSize !== undefined
         ? { standardBatchSize: options.standardBatchSize }
         : {}),

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "import:ats": "bun scripts/import-ats-directory.ts"
   },
   "dependencies": {
     "hono": "^4.8.2",
