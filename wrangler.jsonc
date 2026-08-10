@@ -16,8 +16,8 @@
     }
   ],
   "vars": {
-    "ENVIRONMENT": "development",
-    "APP_BASE_URL": "http://localhost:8787"
+    "ENVIRONMENT": "production",
+    "APP_BASE_URL": "https://YOUR_SUBDOMAIN.workers.dev"
   },
   "observability": {
     "enabled": true

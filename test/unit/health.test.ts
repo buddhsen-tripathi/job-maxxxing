@@ -15,7 +15,7 @@ describe("GET /health", () => {
 
     expect(body.status).toBe("ok");
     expect(body.checks.db).toBe(true);
-    expect(body.environment).toBe("development");
+    expect(body.environment).toBe(env.ENVIRONMENT);
     expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
   });
 

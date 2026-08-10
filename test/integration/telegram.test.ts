@@ -28,7 +28,7 @@ beforeAll(() => {
   fetchMock.activate();
   fetchMock.disableNetConnect();
   const origin = fetchMock.get("https://api.telegram.org");
-  for (const method of ["sendMessage", "editMessageText", "answerCallbackQuery"]) {
+  for (const method of ["sendMessage", "editMessageText", "answerCallbackQuery", "setMyCommands"]) {
     origin
       .intercept({ path: `/bottest-bot-token/${method}`, method: "POST" })
       .reply(200, (opts) => telegramResponse(JSON.parse(String(opts.body ?? "{}")), method))
@@ -126,10 +126,38 @@ describe("telegram webhook security", () => {
   it("ignores unsupported update types", async () => {
     const response = await postWebhook({
       update_id: 1,
-      message: { message_id: 1, chat: { id: 12345 }, text: "hello" },
+      edited_message: { message_id: 1, chat: { id: 12345 }, text: "hello" },
     });
     const body = (await response.json()) as { ignored: boolean };
     expect(body.ignored).toBe(true);
+  });
+});
+
+describe("telegram slash commands", () => {
+  it("lists shortlisted jobs via /shortlists", async () => {
+    const job = await seedScoredJob();
+    await postWebhook(callbackUpdate(`job:shortlist:${job.id}`));
+    calls.length = 0;
+
+    const response = await postWebhook({
+      update_id: 2,
+      message: { message_id: 2, chat: { id: 12345 }, text: "/shortlists" },
+    });
+    expect(response.status).toBe(200);
+    const sends = calls.filter((c) => c.method === "sendMessage");
+    expect(sends.length).toBeGreaterThanOrEqual(2);
+    expect(String(sends[0]?.body.text)).toContain("Shortlisted");
+    expect(String(sends[1]?.body.text)).toContain("Backend Software Engineer");
+  });
+
+  it("replies to /help", async () => {
+    const response = await postWebhook({
+      update_id: 3,
+      message: { message_id: 3, chat: { id: 12345 }, text: "/help" },
+    });
+    expect(response.status).toBe(200);
+    const sends = calls.filter((c) => c.method === "sendMessage");
+    expect(String(sends.at(-1)?.body.text)).toContain("/shortlists");
   });
 });
 

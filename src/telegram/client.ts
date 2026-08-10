@@ -8,6 +8,11 @@ export interface InlineButton {
   url?: string;
 }
 
+export interface BotCommandSpec {
+  command: string;
+  description: string;
+}
+
 export interface TelegramClient {
   sendMessage(input: {
     chatId: string;
@@ -21,6 +26,7 @@ export interface TelegramClient {
     buttons?: InlineButton[][];
   }): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
+  setMyCommands(commands: readonly BotCommandSpec[]): Promise<void>;
 }
 
 function toReplyMarkup(buttons: InlineButton[][] | undefined) {
@@ -96,6 +102,14 @@ export function createTelegramClient(options: {
       await call("answerCallbackQuery", {
         callback_query_id: callbackQueryId,
         ...(text ? { text } : {}),
+      });
+    },
+    async setMyCommands(commands) {
+      await call("setMyCommands", {
+        commands: commands.map((c) => ({
+          command: c.command,
+          description: c.description,
+        })),
       });
     },
   };

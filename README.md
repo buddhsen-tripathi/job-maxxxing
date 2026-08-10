@@ -162,6 +162,8 @@ out of scope until ingest+notify is stable.
 
 - `GET /health`
 - `POST /telegram/webhook` (Telegram only; secret header + chat allowlist)
+  - Slash commands: `/shortlists`, `/skipped`, `/help` (also `/start`)
+  - Inline buttons on digests: Review / Shortlist / Skip / Prepare / Open
 - `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/shortlist|skip|prepare`
 - `GET /api/runs`, `GET /api/runs/:id`
 - `POST /api/admin/run-daily` (bearer auth, supports `dryRun`, `sourceNames`, `limit`)

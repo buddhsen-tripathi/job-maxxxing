@@ -11,6 +11,7 @@ import type { Env } from "../env";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
+import { handleBotCommand } from "../telegram/commands";
 import { isAllowedChat, verifyTelegramSecret } from "../telegram/security";
 
 const UpdateSchema = z.object({
@@ -59,8 +60,9 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
     return c.json({ ok: true, ignored: true, reason: "chat_not_allowed" });
   }
 
+  const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
+
   if (update.callback_query) {
-    const client = createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN });
     let profile: CandidateProfile | undefined;
     try {
       profile = await loadCandidateProfile(c.env);
@@ -84,6 +86,17 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
       ...(llm ? { llm } : {}),
     });
     return c.json({ ok: true });
+  }
+
+  if (update.message?.text) {
+    const result = await handleBotCommand(
+      c.env.DB,
+      client,
+      String(update.message.chat.id),
+      update.message.text,
+    );
+    if (result.handled) return c.json({ ok: true });
+    return c.json({ ok: true, ignored: true, reason: "unsupported_message" });
   }
 
   return c.json({ ok: true, ignored: true, reason: "unsupported_update" });

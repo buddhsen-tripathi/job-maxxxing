@@ -1,9 +1,59 @@
+import type { JobRow } from "../db/schema";
 import type { ScoredJob } from "../jobs/scoring";
 import { formatNyDate } from "../shared/time";
 import type { InlineButton } from "./client";
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function renderHelp(): string {
+  return [
+    "<b>job-maxxing</b>",
+    "",
+    "Cron digests surface matching roles. Use the buttons on each card, or:",
+    "",
+    "/shortlists — jobs you shortlisted",
+    "/skipped — jobs you skipped",
+    "/help — this message",
+    "",
+    "Shortlist bookmarks a role. Prepare drafts answers — nothing is auto-submitted.",
+  ].join("\n");
+}
+
+export function renderJobListSummary(status: "shortlisted" | "skipped", count: number): string {
+  const label = status === "shortlisted" ? "Shortlisted" : "Skipped";
+  if (count === 0) return `<b>${label}</b>\n\nNone yet.`;
+  return `<b>${label}</b> — ${count} job${count === 1 ? "" : "s"}`;
+}
+
+export function renderJobListItem(
+  index: number,
+  job: JobRow,
+  score: number | null,
+): {
+  text: string;
+  buttons: InlineButton[][];
+} {
+  const scoreLine = score === null ? "Match: n/a" : `Match: ${score}`;
+  const text = [
+    `<b>${index}. ${escapeHtml(job.title)} — ${escapeHtml(job.company)}</b>`,
+    scoreLine,
+    `Location: ${escapeHtml(job.location ?? "unknown")}`,
+  ].join("\n");
+  const buttons: InlineButton[][] = [
+    [
+      { text: "Review", callbackData: `job:review:${job.id}` },
+      { text: "Prepare", callbackData: `job:prepare:${job.id}` },
+      { text: "Open", url: job.apply_url },
+    ],
+  ];
+  if (job.status === "shortlisted") {
+    buttons.push([{ text: "Skip", callbackData: `job:skip:${job.id}` }]);
+  } else if (job.status === "skipped") {
+    buttons.push([{ text: "Shortlist", callbackData: `job:shortlist:${job.id}` }]);
+  }
+  return { text, buttons };
 }
 
 export interface DigestSummaryInput {
