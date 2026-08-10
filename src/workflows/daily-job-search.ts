@@ -7,18 +7,17 @@ import {
   parseTelegramSecrets,
   parseVars,
 } from "../config";
-import { getApplicationByJobId } from "../db/repositories/applications";
 import { markBoardPolled, selectBoardsForIngest } from "../db/repositories/boards";
 import {
   getJobByFingerprint,
   insertJobAction,
   insertJobScore,
-  listActionsForJob,
   setJobStatus,
   upsertDiscoveredJob,
 } from "../db/repositories/jobs";
 import { listBlockedCompanyKeys } from "../db/repositories/meta";
 import { completeRun, createRun, failRun } from "../db/repositories/runs";
+import { userHasSkippedJob } from "../db/repositories/user-jobs";
 import type { AtsBoardRow, JobRow } from "../db/schema";
 import type { Env } from "../env";
 import { discoverFromSources, type SourceFailure } from "../jobs/discover";
@@ -144,9 +143,13 @@ function resolveNotifier(
   if (override) return override;
   try {
     const secrets = parseTelegramSecrets(env);
+    const chatId = chatIdOverride || secrets.TELEGRAM_ALLOWED_CHAT_ID;
+    if (!chatId) {
+      throw new Error("no_telegram_chat");
+    }
     return createTelegramNotifier({
       client: createTelegramClient({ token: secrets.TELEGRAM_BOT_TOKEN }),
-      chatId: chatIdOverride || secrets.TELEGRAM_ALLOWED_CHAT_ID,
+      chatId,
       db: env.DB,
     });
   } catch {
@@ -365,16 +368,20 @@ export async function runUserMatchAndNotify(
   const blockedCompanies = await listBlockedCompanyKeys(env.DB);
   const eligible: JobRow[] = [];
   const filterRejects: Record<string, number> = {};
+  /** Cap LLM calls per user per tick to control OpenRouter spend for public bots. */
+  const scoreCap = Math.max(1, Number(env.SCORE_CAP_PER_USER ?? "20") || 20);
 
   for (const row of options.newJobs) {
-    const application = options.dryRun ? null : await getApplicationByJobId(env.DB, row.id);
-    const skips = options.dryRun ? [] : await listActionsForJob(env.DB, row.id, "skip");
+    const previouslySkipped = options.dryRun
+      ? false
+      : await userHasSkippedJob(env.DB, options.userId, row.id);
+    // Applications are still global; do not treat another user's prepare as applied.
     const filter = applyHardFilters(row, {
       preferences: options.profile.preferences,
       profile: options.profile,
       blockedCompanies,
-      hasApplied: application !== null,
-      previouslySkipped: skips.length > 0,
+      hasApplied: false,
+      previouslySkipped,
     });
 
     if (!options.dryRun) {
@@ -393,6 +400,7 @@ export async function runUserMatchAndNotify(
         ),
         now: options.now,
       });
+      // Catalog status is best-effort; matching is per-user and does not depend on it.
       await setJobStatus(env.DB, row.id, filter.eligible ? "eligible" : "rejected_by_filter");
     }
 
@@ -403,7 +411,8 @@ export async function runUserMatchAndNotify(
     }
   }
 
-  const scoring = await scoreJobs(eligible, { client: llm, profile: options.profile, thresholds });
+  const toScore = eligible.slice(0, scoreCap);
+  const scoring = await scoreJobs(toScore, { client: llm, profile: options.profile, thresholds });
 
   if (!options.dryRun) {
     for (const failure of scoring.failures) {
@@ -412,6 +421,7 @@ export async function runUserMatchAndNotify(
     for (const { job, score } of scoring.scored) {
       await insertJobScore(env.DB, {
         jobId: job.id,
+        userId: options.userId,
         model: llm.model,
         totalScore: score.totalScore,
         technicalScore: score.technicalScore,

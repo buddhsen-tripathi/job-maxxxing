@@ -1,13 +1,9 @@
 import { prepareApplication } from "../applications/prepare";
 import type { CandidateProfile } from "../candidate/profile";
 import { getApplicationByJobId } from "../db/repositories/applications";
-import {
-  getJobById,
-  insertJobAction,
-  listActionsForJob,
-  setJobStatus,
-} from "../db/repositories/jobs";
+import { getJobById, insertJobAction, setJobStatus } from "../db/repositories/jobs";
 import { blockCompany, insertAuditEvent } from "../db/repositories/meta";
+import { getUserJobState, upsertUserJobState } from "../db/repositories/user-jobs";
 import { normalizeCompany } from "../jobs/fingerprint";
 import { getScoredJob } from "../jobs/scoring";
 import type { LlmClient } from "../llm/client";
@@ -51,12 +47,8 @@ export interface CallbackQuery {
   message?: { chat: { id: number | string }; message_id: number } | undefined;
 }
 
-async function hasAction(db: D1Database, jobId: string, action: string): Promise<boolean> {
-  const actions = await listActionsForJob(db, jobId, action);
-  return actions.some((entry) => entry.source === "telegram");
-}
-
 export interface CallbackDeps {
+  userId: string;
   profile?: CandidateProfile;
   llm?: LlmClient;
 }
@@ -65,7 +57,7 @@ export async function handleCallbackQuery(
   db: D1Database,
   client: TelegramClient,
   query: CallbackQuery,
-  deps: CallbackDeps = {},
+  deps: CallbackDeps,
 ): Promise<void> {
   const chatId = query.message?.chat.id;
   const messageId = query.message?.message_id;
@@ -88,7 +80,7 @@ export async function handleCallbackQuery(
 
   switch (action.type) {
     case "review": {
-      const scored = await getScoredJob(db, job.id);
+      const scored = await getScoredJob(db, job.id, deps.userId);
       if (!scored) {
         await client.answerCallbackQuery(query.id, "No score available for this job yet.");
         return;
@@ -100,40 +92,64 @@ export async function handleCallbackQuery(
     }
 
     case "shortlist": {
-      if (job.status === "shortlisted" || (await hasAction(db, job.id, "shortlist"))) {
-        await client.answerCallbackQuery(query.id, "Already shortlisted.");
+      const existing = await getUserJobState(db, deps.userId, job.id);
+      if (existing?.status === "shortlisted") {
+        await client.answerCallbackQuery(query.id, "Already saved.");
         return;
       }
-      await setJobStatus(db, job.id, "shortlisted");
-      await insertJobAction(db, { jobId: job.id, action: "shortlist", source: "telegram" });
+      await upsertUserJobState(db, {
+        userId: deps.userId,
+        jobId: job.id,
+        status: "shortlisted",
+      });
+      await insertJobAction(db, {
+        jobId: job.id,
+        action: "shortlist",
+        source: "telegram",
+        metadataJson: JSON.stringify({ userId: deps.userId }),
+      });
       await insertAuditEvent(db, {
         entityType: "job",
         entityId: job.id,
         eventType: "shortlisted",
-        payload: { source: "telegram" },
+        payload: { source: "telegram", userId: deps.userId },
       });
-      await client.answerCallbackQuery(query.id, "Shortlisted.");
+      await client.answerCallbackQuery(query.id, "Saved.");
       return;
     }
 
     case "skip": {
-      if (job.status === "skipped" || (await hasAction(db, job.id, "skip"))) {
+      const existing = await getUserJobState(db, deps.userId, job.id);
+      if (existing?.status === "skipped") {
         await client.answerCallbackQuery(query.id, "Already skipped.");
         return;
       }
-      await setJobStatus(db, job.id, "skipped");
-      await insertJobAction(db, { jobId: job.id, action: "skip", source: "telegram" });
+      await upsertUserJobState(db, {
+        userId: deps.userId,
+        jobId: job.id,
+        status: "skipped",
+      });
+      await insertJobAction(db, {
+        jobId: job.id,
+        action: "skip",
+        source: "telegram",
+        metadataJson: JSON.stringify({ userId: deps.userId }),
+      });
       await insertAuditEvent(db, {
         entityType: "job",
         entityId: job.id,
         eventType: "skipped",
-        payload: { source: "telegram" },
+        payload: { source: "telegram", userId: deps.userId },
       });
       await client.answerCallbackQuery(query.id, "Skipped.");
       return;
     }
 
     case "block": {
+      if (deps.userId !== "default") {
+        await client.answerCallbackQuery(query.id, "Company block is operator-only for now.");
+        return;
+      }
       const confirmation = renderBlockConfirmation(job.id, job.company);
       await client.editMessageText({
         chatId: String(chatId),
@@ -146,15 +162,24 @@ export async function handleCallbackQuery(
     }
 
     case "blockconfirm": {
+      if (deps.userId !== "default") {
+        await client.answerCallbackQuery(query.id, "Company block is operator-only for now.");
+        return;
+      }
       const normalized = normalizeCompany(job.company);
       await blockCompany(db, { normalizedCompany: normalized, displayName: job.company });
       await setJobStatus(db, job.id, "blocked");
-      await insertJobAction(db, { jobId: job.id, action: "block_company", source: "telegram" });
+      await insertJobAction(db, {
+        jobId: job.id,
+        action: "block_company",
+        source: "telegram",
+        metadataJson: JSON.stringify({ userId: deps.userId }),
+      });
       await insertAuditEvent(db, {
         entityType: "job",
         entityId: job.id,
         eventType: "company_blocked",
-        payload: { company: job.company, source: "telegram" },
+        payload: { company: job.company, source: "telegram", userId: deps.userId },
       });
       await client.editMessageText({
         chatId: String(chatId),
@@ -166,7 +191,7 @@ export async function handleCallbackQuery(
     }
 
     case "back": {
-      const scored = await getScoredJob(db, job.id);
+      const scored = await getScoredJob(db, job.id, deps.userId);
       if (scored) {
         const card = renderReviewCard(scored);
         await client.editMessageText({
@@ -181,6 +206,13 @@ export async function handleCallbackQuery(
     }
 
     case "prepare": {
+      if (deps.userId !== "default") {
+        await client.answerCallbackQuery(
+          query.id,
+          "Prepare is operator-only until per-user apps ship.",
+        );
+        return;
+      }
       if (!deps.profile) {
         await client.answerCallbackQuery(
           query.id,
@@ -217,6 +249,10 @@ export async function handleCallbackQuery(
     }
 
     case "answers": {
+      if (deps.userId !== "default") {
+        await client.answerCallbackQuery(query.id, "Answers review is operator-only for now.");
+        return;
+      }
       const application = await getApplicationByJobId(db, job.id);
       if (!application?.prepared_answers_json) {
         await client.answerCallbackQuery(query.id, "No prepared application for this job.");
