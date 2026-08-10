@@ -45,6 +45,17 @@ Secrets (set with `bunx wrangler secret put <NAME>` in production, `.dev.vars` l
 | `OPENROUTER_MODEL` | OpenRouter model id (e.g. `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`) |
 | `ADMIN_TOKEN` | Bearer token for `/api/admin/*` |
 
+Optional tuning vars (Wrangler `vars`, not secrets):
+
+| Name | Default | Purpose |
+| --- | --- | --- |
+| `SCORE_STRONG_MATCH_THRESHOLD` | `85` | Total score (0-100) for "strong match" |
+| `SCORE_REVIEW_THRESHOLD` | `60` | Minimum total score to appear in the digest |
+
+US-based roles are prioritized by default (`preferUsBased` in the candidate
+profile): the scoring prompt rewards US locations and the digest sorts
+US-based matches first, then by score.
+
 ### Board catalog (production)
 
 Discovery sources live in D1 table `ats_boards` (not Wrangler secrets). Migration
