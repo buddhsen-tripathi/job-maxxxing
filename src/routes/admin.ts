@@ -29,7 +29,7 @@ const RunDailyBodySchema = z.object({
 });
 
 const UpsertBoardBodySchema = z.object({
-  provider: z.enum(["greenhouse", "lever", "ashby"]),
+  provider: z.enum(["greenhouse", "lever", "ashby", "workday"]),
   slug: z.string().min(1),
   companyName: z.string().min(1),
   tier: z.enum(["priority", "standard"]).default("standard"),

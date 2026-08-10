@@ -126,7 +126,7 @@ export interface AuditEventRow {
   created_at: string;
 }
 
-export type AtsProvider = "greenhouse" | "lever" | "ashby";
+export type AtsProvider = "greenhouse" | "lever" | "ashby" | "workday";
 export type AtsBoardTier = "priority" | "standard";
 
 export interface AtsBoardRow {

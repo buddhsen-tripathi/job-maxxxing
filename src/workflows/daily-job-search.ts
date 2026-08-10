@@ -318,6 +318,8 @@ function sourceEntryKey(entry: SourceEntry): string {
       return `lever:${entry.account}`;
     case "ashby":
       return `ashby:${entry.boardSlug}`;
+    case "workday":
+      return `workday:${entry.host}/${entry.tenant}/${entry.site}`;
   }
 }
 

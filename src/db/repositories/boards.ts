@@ -35,6 +35,13 @@ export function boardToSourceEntry(board: AtsBoardRow): SourceEntry {
         company: board.company_name,
         boardSlug: board.slug,
       };
+    case "workday": {
+      const [host, tenant, site] = board.slug.split("/");
+      if (!host || !tenant || !site) {
+        throw new Error(`Invalid workday board slug "${board.slug}"; expected host/tenant/site.`);
+      }
+      return { source: "workday", company: board.company_name, host, tenant, site, limit: 50 };
+    }
   }
 }
 

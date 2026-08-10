@@ -27,10 +27,20 @@ export const AshbySourceEntrySchema = z.object({
   boardSlug: z.string().min(1),
 });
 
+export const WorkdaySourceEntrySchema = z.object({
+  source: z.literal("workday"),
+  company: z.string().min(1),
+  host: z.string().min(1),
+  tenant: z.string().min(1),
+  site: z.string().min(1),
+  limit: z.number().int().positive().max(200).default(50),
+});
+
 export const SourceEntrySchema = z.discriminatedUnion("source", [
   GreenhouseSourceEntrySchema,
   LeverSourceEntrySchema,
   AshbySourceEntrySchema,
+  WorkdaySourceEntrySchema,
 ]);
 
 export const SourcesConfigSchema = z.array(SourceEntrySchema);
@@ -38,6 +48,7 @@ export const SourcesConfigSchema = z.array(SourceEntrySchema);
 export type GreenhouseSourceEntry = z.infer<typeof GreenhouseSourceEntrySchema>;
 export type LeverSourceEntry = z.infer<typeof LeverSourceEntrySchema>;
 export type AshbySourceEntry = z.infer<typeof AshbySourceEntrySchema>;
+export type WorkdaySourceEntry = z.infer<typeof WorkdaySourceEntrySchema>;
 export type SourceEntry = z.infer<typeof SourceEntrySchema>;
 
 export class SourceFetchError extends Error {

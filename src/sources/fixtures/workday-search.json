@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Software Engineer, Backend",
+      "externalPath": "/job/New-York-NY/Software-Engineer-Backend_REQ-1001",
+      "locationsText": "New York, NY",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["REQ-1001"]
+    },
+    {
+      "title": "Senior Software Engineer, Infrastructure",
+      "externalPath": "/job/Remote/Senior-Software-Engineer-Infrastructure_REQ-1002",
+      "locationsText": "Remote - United States",
+      "postedOn": "Posted 5 Days Ago",
+      "bulletFields": ["REQ-1002"]
+    }
+  ]
+}

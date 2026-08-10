@@ -4,6 +4,7 @@ import { createAshbyAdapter } from "../sources/ashby";
 import { createGreenhouseAdapter } from "../sources/greenhouse";
 import { createLeverAdapter } from "../sources/lever";
 import type { JobSourceAdapter, SourceEntry } from "../sources/source-adapter";
+import { createWorkdayAdapter } from "../sources/workday";
 import { deduplicateInMemory } from "./deduplicate";
 import { computeFingerprint } from "./fingerprint";
 import type { DiscoveryContext, NormalizedJob } from "./types";
@@ -29,6 +30,8 @@ export function createAdapterForEntry(entry: SourceEntry): JobSourceAdapter {
       return createLeverAdapter(entry);
     case "ashby":
       return createAshbyAdapter(entry);
+    case "workday":
+      return createWorkdayAdapter(entry);
   }
 }
 
