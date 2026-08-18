@@ -1,7 +1,10 @@
 import { env, fetchMock, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import candidateProfileExample from "../../candidate-profile.example.json";
+import { parseCandidateProfile } from "../../src/candidate/profile";
 import { insertJob, insertJobScore, listActionsForJob } from "../../src/db/repositories/jobs";
 import { listBlockedCompanies } from "../../src/db/repositories/meta";
+import { getUser, upsertUserProfile } from "../../src/db/repositories/users";
 import { getScoredJob } from "../../src/jobs/scoring";
 import { createTelegramNotifier } from "../../src/telegram/notifier";
 import { must } from "../helpers";
@@ -109,6 +112,7 @@ beforeEach(async () => {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
   await db.prepare("DELETE FROM users WHERE id != 'default'").run();
+  await db.prepare("UPDATE users SET active = 1 WHERE id = 'default'").run();
   calls.length = 0;
 });
 
@@ -163,6 +167,63 @@ describe("telegram slash commands", () => {
     expect(response.status).toBe(200);
     const sends = calls.filter((c) => c.method === "sendMessage");
     expect(String(sends.at(-1)?.body.text)).toContain("/saved");
+  });
+
+  it("pauses and resumes digests without wiping the profile", async () => {
+    await upsertUserProfile(db, "default", parseCandidateProfile(candidateProfileExample));
+
+    const paused = await postWebhook({
+      update_id: 10,
+      message: { message_id: 10, chat: { id: 12345 }, text: "/pause" },
+    });
+    expect(paused.status).toBe(200);
+    expect((await getUser(db, "default"))?.active).toBe(0);
+    expect(String(calls.at(-1)?.body.text)).toContain("Paused");
+
+    calls.length = 0;
+    const already = await postWebhook({
+      update_id: 11,
+      message: { message_id: 11, chat: { id: 12345 }, text: "/stop" },
+    });
+    expect(already.status).toBe(200);
+    expect(String(calls.at(-1)?.body.text)).toContain("Already paused");
+
+    calls.length = 0;
+    const hint = await postWebhook({
+      update_id: 12,
+      message: { message_id: 12, chat: { id: 12345 }, text: "hello" },
+    });
+    expect(hint.status).toBe(200);
+    expect(String(calls.at(-1)?.body.text)).toContain("Digests are paused");
+
+    calls.length = 0;
+    const resumed = await postWebhook({
+      update_id: 13,
+      message: { message_id: 13, chat: { id: 12345 }, text: "/resume" },
+    });
+    expect(resumed.status).toBe(200);
+    expect((await getUser(db, "default"))?.active).toBe(1);
+    expect(String(calls.at(-1)?.body.text)).toContain("Resumed");
+  });
+
+  it("treats /start as resume when a paused user already has a profile", async () => {
+    await upsertUserProfile(db, "default", parseCandidateProfile(candidateProfileExample));
+    await postWebhook({
+      update_id: 20,
+      message: { message_id: 20, chat: { id: 12345 }, text: "/pause" },
+    });
+    expect((await getUser(db, "default"))?.active).toBe(0);
+
+    calls.length = 0;
+    const response = await postWebhook({
+      update_id: 21,
+      message: { message_id: 21, chat: { id: 12345 }, text: "/start" },
+    });
+    expect(response.status).toBe(200);
+    expect((await getUser(db, "default"))?.active).toBe(1);
+    const text = String(calls.at(-1)?.body.text);
+    expect(text).toContain("Resumed");
+    expect(text).not.toContain("Welcome to job-maxxing");
   });
 });
 

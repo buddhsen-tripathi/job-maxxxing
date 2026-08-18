@@ -6,13 +6,18 @@ import {
   parseTelegramSecrets,
   type TelegramSecrets,
 } from "../config";
-import { ensureTelegramUser, loadProfileForUser } from "../db/repositories/users";
+import { getUserSession } from "../db/repositories/user-sessions";
+import { ensureTelegramUser, getUserProfile, loadProfileForUser } from "../db/repositories/users";
 import type { Env } from "../env";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
-import { handleBotCommand, parseBotCommand } from "../telegram/commands";
-import { handleOnboardingMessage, startOnboarding } from "../telegram/onboarding";
+import { handleBotCommand, parseBotCommand, resumeDigests } from "../telegram/commands";
+import {
+  handleOnboardingMessage,
+  isOnboardingInProgress,
+  startOnboarding,
+} from "../telegram/onboarding";
 import { isAllowedChat, verifyTelegramSecret } from "../telegram/security";
 
 const UpdateSchema = z.object({
@@ -135,15 +140,26 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
   const isStart = /^\/start(?:@\S+)?(?:\s|$)/i.test(text);
 
   if (isStart && user.active !== 1) {
+    const session = await getUserSession(c.env.DB, user.id);
+    if (!isOnboardingInProgress(session)) {
+      const profile = await getUserProfile(c.env.DB, user.id);
+      if (profile) {
+        await resumeDigests(c.env.DB, client, chatIdStr, user.id);
+        return c.json({ ok: true });
+      }
+    }
     await startOnboarding(c.env.DB, client, user, chatIdStr);
     return c.json({ ok: true });
   }
 
   const knownBotCommand = text ? parseBotCommand(text) : null;
+  const session = user.active !== 1 ? await getUserSession(c.env.DB, user.id) : null;
+  const awaitingOnboarding =
+    user.active !== 1 &&
+    (isOnboardingInProgress(session) || !(await getUserProfile(c.env.DB, user.id)));
   const routeToOnboarding =
-    Boolean(message.document) ||
     isOnboardingCommand(text) ||
-    (user.active !== 1 && !knownBotCommand && Boolean(text || message.document));
+    (awaitingOnboarding && !knownBotCommand && Boolean(text || message.document));
 
   if (routeToOnboarding) {
     if (!llm) {
@@ -179,6 +195,17 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
       userId: user.id,
     });
     if (result.handled) return c.json({ ok: true });
+  }
+
+  if (user.active !== 1 && (await getUserProfile(c.env.DB, user.id))) {
+    await client.sendMessage({
+      chatId: chatIdStr,
+      text: "Digests are paused. /resume to continue, /restart to rebuild your profile.",
+    });
+    return c.json({ ok: true });
+  }
+
+  if (message.text) {
     return c.json({ ok: true, ignored: true, reason: "unsupported_message" });
   }
 

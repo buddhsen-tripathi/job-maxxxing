@@ -16,6 +16,14 @@ describe("parseBotCommand", () => {
     expect(parseBotCommand("/skipped")).toEqual({ type: "skipped" });
   });
 
+  it("parses pause/stop and resume aliases", () => {
+    expect(parseBotCommand("/pause")).toEqual({ type: "pause" });
+    expect(parseBotCommand("/stop")).toEqual({ type: "pause" });
+    expect(parseBotCommand("/stop@jmaxxxingbot")).toEqual({ type: "pause" });
+    expect(parseBotCommand("/resume")).toEqual({ type: "resume" });
+    expect(parseBotCommand("/unpause")).toEqual({ type: "resume" });
+  });
+
   it("returns null for non-commands and unknown for bad slash cmds", () => {
     expect(parseBotCommand("hello")).toBeNull();
     expect(parseBotCommand("/nope")).toEqual({ type: "unknown", raw: "/nope" });

@@ -4,6 +4,7 @@ import candidateProfileExample from "../../candidate-profile.example.json";
 import { listJobs } from "../../src/db/repositories/jobs";
 import { listAuditEvents } from "../../src/db/repositories/meta";
 import { getRun } from "../../src/db/repositories/runs";
+import { setUserActive } from "../../src/db/repositories/users";
 import { createMockLlmClient } from "../../src/llm/mock";
 import greenhouseFixture from "../../src/sources/fixtures/greenhouse-board.json";
 import leverFixture from "../../src/sources/fixtures/lever-postings.json";
@@ -102,6 +103,7 @@ beforeEach(async () => {
   env.CANDIDATE_PROFILE_JSON = JSON.stringify(candidateProfileExample);
   env.SOURCES_JSON = JSON.stringify(SOURCES);
   env.ADMIN_TOKEN = "test-admin-token";
+  await db.prepare("UPDATE users SET active = 1 WHERE id = 'default'").run();
 });
 
 describe("runDailyJobSearch", () => {
@@ -197,6 +199,16 @@ describe("runDailyJobSearch", () => {
       .prepare("SELECT COUNT(*) AS n FROM job_actions")
       .first<{ n: number }>();
     expect(actions?.n).toBe(0);
+  });
+
+  it("does not notify a paused user", async () => {
+    await setUserActive(db, "default", false);
+    const t = createTestNotifier();
+    const summary = await runDailyJobSearch(env, baseOptions(t));
+    expect(summary.status).toBe("completed");
+    expect(summary.usersNotified).toBe(0);
+    expect(t.digests).toHaveLength(0);
+    expect(t.noMatches).toHaveLength(0);
   });
 });
 

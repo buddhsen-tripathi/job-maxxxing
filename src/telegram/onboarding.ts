@@ -10,8 +10,8 @@ import {
   getUserSession,
   upsertUserSession,
 } from "../db/repositories/user-sessions";
-import { setUserActive, upsertUserProfile } from "../db/repositories/users";
-import type { UserRow, UserSessionState } from "../db/schema";
+import { getUserProfile, setUserActive, upsertUserProfile } from "../db/repositories/users";
+import type { UserRow, UserSessionRow, UserSessionState } from "../db/schema";
 import type { LlmClient } from "../llm/client";
 import {
   downloadTelegramFile,
@@ -31,8 +31,12 @@ const WELCOME = [
   "Send a <b>public resume URL</b> (PDF or text/HTML), or upload a <b>PDF</b> here.",
   "Then I’ll ask a few search preferences.",
   "",
-  "Commands: /start · /status · /restart · /help",
+  "Commands: /start · /status · /pause · /resume · /restart · /help",
 ].join("\n");
+
+export function isOnboardingInProgress(session: UserSessionRow | null): boolean {
+  return Boolean(session && session.state !== "ready");
+}
 
 function parseDraft(raw: string | null): OnboardingDraft | null {
   if (!raw) return null;
@@ -200,12 +204,22 @@ export async function handleOnboardingMessage(options: {
   }
 
   if (text.toLowerCase() === "/status" || text.toLowerCase().startsWith("/status@")) {
-    const state = session?.state ?? (user.active ? "ready" : "not_started");
+    const profile = await getUserProfile(db, user.id);
+    const midOnboarding = isOnboardingInProgress(session);
+    let statusText: string;
+    if (user.active === 1) {
+      statusText =
+        "You’re active. Digests will use your saved profile.\n/pause or /stop to halt digests.\n/restart to re-onboard.";
+    } else if (profile && !midOnboarding) {
+      statusText =
+        "Paused. No digests until /resume.\nProfile and saved jobs are kept.\n/restart to rebuild your profile.";
+    } else {
+      const state = session?.state ?? "not_started";
+      statusText = `Onboarding in progress: <b>${state}</b>\nSend /start if you need the welcome again.`;
+    }
     await client.sendMessage({
       chatId,
-      text: user.active
-        ? `You’re active. Digests will use your saved profile.\nSession: ${state}\n/restart to re-onboard.`
-        : `Onboarding in progress: <b>${state}</b>\nSend /start if you need the welcome again.`,
+      text: statusText,
     });
     return { handled: true };
   }
@@ -380,7 +394,7 @@ export async function handleOnboardingMessage(options: {
             `Locations: ${profile.preferences.locations.join(", ")}`,
             "",
             "You’ll get digests when new roles match (about every 3 hours).",
-            "Use /saved and /skipped anytime. /restart to rebuild your profile.",
+            "Use /saved and /skipped anytime. /pause or /stop to halt digests. /restart to rebuild your profile.",
           ].join("\n"),
         });
       } catch (error) {

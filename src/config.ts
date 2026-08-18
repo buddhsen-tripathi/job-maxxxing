@@ -10,6 +10,7 @@ import {
 import { getAppConfigValue } from "./db/repositories/meta";
 import {
   ensureUser,
+  getUser,
   listActiveUsersWithProfiles,
   loadProfileForUser,
   upsertUserProfile,
@@ -176,11 +177,12 @@ export async function ensureDefaultUserProfile(env: Env): Promise<void> {
     // optional during dry runs / tests without telegram
   }
 
+  const existingUser = await getUser(env.DB, "default");
   await ensureUser(env.DB, {
     id: "default",
     displayName: "Default operator",
     telegramChatId,
-    active: true,
+    active: existingUser ? existingUser.active === 1 : true,
   });
 
   const existing = await loadProfileForUser(env.DB, "default");
@@ -209,6 +211,9 @@ export async function loadActiveProfiles(env: Env) {
   await ensureDefaultUserProfile(env);
   const withProfiles = await listActiveUsersWithProfiles(env.DB);
   if (withProfiles.length > 0) return withProfiles;
+
+  const defaultUser = await getUser(env.DB, "default");
+  if (defaultUser && defaultUser.active !== 1) return [];
 
   const profile = await loadCandidateProfile(env);
   return [
