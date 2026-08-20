@@ -5,7 +5,7 @@ import {
   renderDraftSummary,
 } from "../candidate/extract-profile";
 import type { SearchPreferences } from "../candidate/preferences";
-import { upsertUserResume } from "../db/repositories/user-resumes";
+import { getUserResume } from "../db/repositories/user-resumes";
 import {
   clearUserSession,
   getUserSession,
@@ -20,7 +20,7 @@ import {
   fetchResumeFromUrl,
   type ResumeTextResult,
 } from "../resume/fetch";
-import { putUserResume, resumeFileName } from "../resume/store";
+import { persistResumeFile } from "../resume/store";
 import { errorMessage } from "../shared/errors";
 import type { TelegramClient } from "./client";
 
@@ -37,7 +37,7 @@ const WELCOME = [
 
 export function isOnboardingInProgress(session: UserSessionRow | null): boolean {
   if (!session || session.state === "ready") return false;
-  if (session.state === "applying_ask" || session.state === "applying_confirm") return false;
+  if (session.state.startsWith("applying_")) return false;
   return true;
 }
 
@@ -212,8 +212,10 @@ export async function handleOnboardingMessage(options: {
     const midOnboarding = isOnboardingInProgress(session);
     let statusText: string;
     if (user.active === 1) {
-      statusText =
-        "You’re active. Digests will use your saved profile.\n/pause to halt digests.\n/restart to re-onboard.";
+      const resume = await getUserResume(db, user.id);
+      statusText = resume
+        ? "You’re active. Digests will use your saved profile.\n/pause to halt digests.\n/restart to re-onboard."
+        : "You’re active, but we don’t have a resume file to attach on Apply.\nUpload a <b>PDF</b> here, or tap Apply and paste a public resume URL.\nYour profile stays as-is.";
     } else if (profile && !midOnboarding) {
       statusText =
         "Paused. No digests until /resume.\nProfile and saved jobs are kept.\n/restart to rebuild your profile.";
@@ -229,7 +231,7 @@ export async function handleOnboardingMessage(options: {
   }
 
   // Apply Q&A is handled separately.
-  if (session?.state === "applying_ask" || session?.state === "applying_confirm") {
+  if (session?.state.startsWith("applying_")) {
     return { handled: false };
   }
 
@@ -281,16 +283,10 @@ export async function handleOnboardingMessage(options: {
       }
 
       if (options.resumes) {
-        const fileName = resumeFileName(resume.sourceLabel, resume.contentType);
-        const key = await putUserResume(options.resumes, user.id, resume.bytes, {
+        await persistResumeFile(db, options.resumes, user.id, {
+          bytes: resume.bytes,
           contentType: resume.contentType,
-          fileName,
-        });
-        await upsertUserResume(db, {
-          userId: user.id,
-          r2Key: key,
-          contentType: resume.contentType,
-          fileName,
+          sourceLabel: resume.sourceLabel,
         });
       }
 

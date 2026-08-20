@@ -10,7 +10,12 @@ import { getUserSession } from "../db/repositories/user-sessions";
 import { ensureTelegramUser, getUserProfile, loadProfileForUser } from "../db/repositories/users";
 import type { Env } from "../env";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
-import { handleApplyMessage, isApplySessionState } from "../telegram/apply";
+import {
+  handleApplyMessage,
+  handleApplyResumeCapture,
+  handleMissingResumeUpload,
+  isApplySessionState,
+} from "../telegram/apply";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
 import { handleBotCommand, parseBotCommand, resumeDigests } from "../telegram/commands";
@@ -155,10 +160,33 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
   }
 
   const knownBotCommand = text ? parseBotCommand(text) : null;
+  const document = message.document
+    ? {
+        fileId: message.document.file_id,
+        ...(message.document.file_name ? { fileName: message.document.file_name } : {}),
+        ...(message.document.mime_type ? { mimeType: message.document.mime_type } : {}),
+      }
+    : undefined;
 
-  if (text && !knownBotCommand && !isOnboardingCommand(text)) {
+  if (!knownBotCommand && !isOnboardingCommand(text)) {
     const applySession = await getUserSession(c.env.DB, user.id);
-    if (applySession && isApplySessionState(applySession.state)) {
+    if (applySession?.state === "applying_resume") {
+      const profile = await loadProfileForUser(c.env.DB, user.id);
+      if (profile) {
+        const apply = await handleApplyResumeCapture({
+          db: c.env.DB,
+          resumes: c.env.RESUMES,
+          client,
+          chatId: chatIdStr,
+          userId: user.id,
+          profile,
+          botToken: secrets.TELEGRAM_BOT_TOKEN,
+          ...(text ? { text } : {}),
+          ...(document ? { document } : {}),
+        });
+        if (apply.handled) return c.json({ ok: true });
+      }
+    } else if (applySession && isApplySessionState(applySession.state) && text) {
       const profile = await loadProfileForUser(c.env.DB, user.id);
       if (profile) {
         const apply = await handleApplyMessage({
@@ -196,15 +224,7 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
       user,
       chatId: chatIdStr,
       ...(message.text ? { text: message.text } : {}),
-      ...(message.document
-        ? {
-            document: {
-              fileId: message.document.file_id,
-              ...(message.document.file_name ? { fileName: message.document.file_name } : {}),
-              ...(message.document.mime_type ? { mimeType: message.document.mime_type } : {}),
-            },
-          }
-        : {}),
+      ...(document ? { document } : {}),
       botToken: secrets.TELEGRAM_BOT_TOKEN,
       llm,
       resumes: c.env.RESUMES,
@@ -217,6 +237,19 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
       userId: user.id,
     });
     if (result.handled) return c.json({ ok: true });
+  }
+
+  if (document && (await getUserProfile(c.env.DB, user.id))) {
+    const stored = await handleMissingResumeUpload({
+      db: c.env.DB,
+      resumes: c.env.RESUMES,
+      client,
+      chatId: chatIdStr,
+      userId: user.id,
+      botToken: secrets.TELEGRAM_BOT_TOKEN,
+      document,
+    });
+    if (stored.handled) return c.json({ ok: true });
   }
 
   if (user.active !== 1 && (await getUserProfile(c.env.DB, user.id))) {

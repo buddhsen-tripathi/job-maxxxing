@@ -229,6 +229,7 @@ export async function handleCallbackQuery(
           job,
           userId: deps.userId,
           profile: deps.profile,
+          ...(deps.resumes ? { resumes: deps.resumes } : {}),
         });
       } catch (error) {
         await client.sendMessage({

@@ -9,12 +9,47 @@ import type { ApplyDraft } from "../applications/fill";
 import { parseGreenhouseApplyTarget } from "../applications/greenhouse";
 import type { CandidateProfile } from "../candidate/profile";
 import { getJobById } from "../db/repositories/jobs";
-import { clearUserSession, getUserSession } from "../db/repositories/user-sessions";
+import { getUserResume } from "../db/repositories/user-resumes";
+import {
+  clearUserSession,
+  getUserSession,
+  upsertUserSession,
+} from "../db/repositories/user-sessions";
 import type { JobRow } from "../db/schema";
+import {
+  downloadTelegramFileBytes,
+  extractFirstUrl,
+  fetchResumeBytesFromUrl,
+} from "../resume/fetch";
+import { persistResumeFile } from "../resume/store";
+import { errorMessage } from "../shared/errors";
 import type { TelegramClient } from "./client";
 
 export function isApplySessionState(state?: string | null): boolean {
-  return state === "applying_ask" || state === "applying_confirm";
+  return state === "applying_ask" || state === "applying_confirm" || state === "applying_resume";
+}
+
+function parseResumeWaitDraft(raw: string | null): { jobId: string } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { jobId?: unknown; fields?: unknown };
+    if (typeof parsed.jobId !== "string" || !parsed.jobId) return null;
+    if (parsed.fields !== undefined) return null;
+    return { jobId: parsed.jobId };
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePdf(input: {
+  contentType: string;
+  sourceLabel: string;
+  bytes: Uint8Array;
+}): boolean {
+  const type = input.contentType.toLowerCase();
+  const label = input.sourceLabel.toLowerCase();
+  if (type.includes("pdf") || label.endsWith(".pdf")) return true;
+  return input.bytes[0] === 0x25 && input.bytes[1] === 0x50 && input.bytes[2] === 0x44;
 }
 
 function escapeHtml(text: string): string {
@@ -55,12 +90,15 @@ function renderAsk(question: string) {
   return `Greenhouse needs this to apply:\n\n<b>${escapeHtml(question)}</b>\n\nReply with your answer. I’ll reuse it on similar questions later.`;
 }
 
-async function sendStartResult(
-  client: TelegramClient,
-  chatId: string,
-  job: JobRow,
-  result: ApplyStartResult,
-): Promise<void> {
+async function sendStartResult(options: {
+  db: D1Database;
+  client: TelegramClient;
+  chatId: string;
+  userId: string;
+  job: JobRow;
+  result: ApplyStartResult;
+}): Promise<void> {
+  const { client, chatId, job, result } = options;
   switch (result.kind) {
     case "unsupported":
     case "blocked_file":
@@ -74,9 +112,25 @@ async function sendStartResult(
       });
       return;
     case "no_resume":
+      await upsertUserSession(options.db, {
+        userId: options.userId,
+        state: "applying_resume",
+        draftJson: JSON.stringify({ jobId: job.id }),
+      });
       await client.sendMessage({
         chatId,
-        text: "No resume file on file. Send /restart and upload a PDF (or a resume URL) so we can attach it.",
+        text: [
+          "Please upload a resume so we can attach it.",
+          "",
+          "• Upload a <b>PDF</b> in this chat, or",
+          "• Paste a <b>public resume URL</b>",
+          "",
+          "Your profile stays as-is — this is only the file we send with the application.",
+        ].join("\n"),
+        buttons: [
+          [{ text: "Cancel", callbackData: `job:cancel:${job.id}` }],
+          [{ text: "Open listing", url: job.apply_url }],
+        ],
       });
       return;
     case "already_submitted":
@@ -105,6 +159,7 @@ async function sendStartResult(
 
 export async function beginApply(options: {
   db: D1Database;
+  resumes?: R2Bucket;
   client: TelegramClient;
   chatId: string;
   job: JobRow;
@@ -134,9 +189,17 @@ export async function beginApply(options: {
     job: options.job,
     userId: options.userId,
     profile: options.profile,
+    ...(options.resumes ? { resumes: options.resumes } : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
-  await sendStartResult(options.client, options.chatId, options.job, result);
+  await sendStartResult({
+    db: options.db,
+    client: options.client,
+    chatId: options.chatId,
+    userId: options.userId,
+    job: options.job,
+    result,
+  });
 }
 
 export async function handleApplyMessage(options: {
@@ -148,7 +211,10 @@ export async function handleApplyMessage(options: {
   text: string;
 }): Promise<{ handled: boolean }> {
   const session = await getUserSession(options.db, options.userId);
-  if (!session || !isApplySessionState(session.state)) return { handled: false };
+  if (!session || session.state === "applying_resume") return { handled: false };
+  if (session.state !== "applying_ask" && session.state !== "applying_confirm") {
+    return { handled: false };
+  }
   const draft = parseApplyDraft(session.draft_json);
   if (!draft) {
     await clearUserSession(options.db, options.userId);
@@ -171,8 +237,159 @@ export async function handleApplyMessage(options: {
     draft,
     text: options.text,
   });
-  await sendStartResult(options.client, options.chatId, job, result);
+  await sendStartResult({
+    db: options.db,
+    client: options.client,
+    chatId: options.chatId,
+    userId: options.userId,
+    job,
+    result,
+  });
   return { handled: true };
+}
+
+export async function handleApplyResumeCapture(options: {
+  db: D1Database;
+  resumes: R2Bucket;
+  client: TelegramClient;
+  chatId: string;
+  userId: string;
+  profile: CandidateProfile;
+  botToken: string;
+  text?: string;
+  document?: { fileId: string; fileName?: string; mimeType?: string };
+  fetchImpl?: typeof fetch;
+}): Promise<{ handled: boolean }> {
+  const session = await getUserSession(options.db, options.userId);
+  if (session?.state !== "applying_resume") return { handled: false };
+  const wait = parseResumeWaitDraft(session.draft_json);
+  if (!wait) {
+    await clearUserSession(options.db, options.userId);
+    return { handled: false };
+  }
+  const job = await getJobById(options.db, wait.jobId);
+  if (!job) {
+    await clearUserSession(options.db, options.userId);
+    await options.client.sendMessage({
+      chatId: options.chatId,
+      text: "That job is gone. Pick another from a digest.",
+    });
+    return { handled: true };
+  }
+
+  const stored = await captureAndStoreResume({
+    ...options,
+    promptOnMissing: true,
+    job,
+  });
+  if (!stored) return { handled: true };
+
+  await beginApply({
+    db: options.db,
+    resumes: options.resumes,
+    client: options.client,
+    chatId: options.chatId,
+    job,
+    userId: options.userId,
+    profile: options.profile,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
+  return { handled: true };
+}
+
+export async function handleMissingResumeUpload(options: {
+  db: D1Database;
+  resumes: R2Bucket;
+  client: TelegramClient;
+  chatId: string;
+  userId: string;
+  botToken: string;
+  text?: string;
+  document?: { fileId: string; fileName?: string; mimeType?: string };
+  fetchImpl?: typeof fetch;
+}): Promise<{ handled: boolean }> {
+  const existing = await getUserResume(options.db, options.userId);
+  if (existing) return { handled: false };
+  if (!options.document) return { handled: false };
+
+  const stored = await captureAndStoreResume({
+    ...options,
+    promptOnMissing: false,
+  });
+  if (!stored) return { handled: Boolean(options.document) };
+  await options.client.sendMessage({
+    chatId: options.chatId,
+    text: `Resume saved as <b>${escapeHtml(stored.fileName)}</b>. Tap Apply on a job to submit it.`,
+  });
+  return { handled: true };
+}
+
+async function captureAndStoreResume(options: {
+  db: D1Database;
+  resumes: R2Bucket;
+  client: TelegramClient;
+  chatId: string;
+  userId: string;
+  botToken: string;
+  text?: string;
+  document?: { fileId: string; fileName?: string; mimeType?: string };
+  fetchImpl?: typeof fetch;
+  promptOnMissing: boolean;
+  job?: JobRow;
+}): Promise<{ fileName: string } | null> {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  try {
+    let raw: { bytes: Uint8Array; contentType: string; sourceLabel: string } | null = null;
+    if (options.document) {
+      const mime = options.document.mimeType?.toLowerCase() ?? "";
+      const name = options.document.fileName?.toLowerCase() ?? "";
+      if (!mime.includes("pdf") && !name.endsWith(".pdf")) {
+        await options.client.sendMessage({
+          chatId: options.chatId,
+          text: "Please upload a PDF, or paste a public resume URL.",
+        });
+        return null;
+      }
+      raw = await downloadTelegramFileBytes({
+        token: options.botToken,
+        fileId: options.document.fileId,
+        ...(options.document.fileName ? { fileName: options.document.fileName } : {}),
+        ...(options.document.mimeType ? { mimeType: options.document.mimeType } : {}),
+        fetchImpl,
+      });
+    } else if (options.text) {
+      const url = extractFirstUrl(options.text);
+      if (!url) {
+        if (options.promptOnMissing) {
+          await options.client.sendMessage({
+            chatId: options.chatId,
+            text: "Please upload a PDF, or paste a public resume URL.",
+          });
+        }
+        return null;
+      }
+      raw = await fetchResumeBytesFromUrl(url, fetchImpl);
+    }
+
+    if (!raw) return null;
+    if (!looksLikePdf(raw) && !raw.contentType.toLowerCase().includes("text")) {
+      await options.client.sendMessage({
+        chatId: options.chatId,
+        text: "That file doesn’t look like a resume PDF. Upload a PDF, or paste a public resume URL.",
+      });
+      return null;
+    }
+
+    const saved = await persistResumeFile(options.db, options.resumes, options.userId, raw);
+    return { fileName: saved.fileName };
+  } catch (error) {
+    await options.client.sendMessage({
+      chatId: options.chatId,
+      text: `Couldn’t store that resume: ${escapeHtml(errorMessage(error))}\nTry a PDF or another public URL.`,
+      ...(options.job ? { buttons: [[{ text: "Open listing", url: options.job.apply_url }]] } : {}),
+    });
+    return null;
+  }
 }
 
 export async function confirmApply(options: {

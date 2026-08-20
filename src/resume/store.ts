@@ -1,3 +1,5 @@
+import { upsertUserResume } from "../db/repositories/user-resumes";
+
 export function resumeObjectKey(userId: string): string {
   return `users/${userId}/resume`;
 }
@@ -30,6 +32,26 @@ export async function putUserResume(
     customMetadata: { fileName: meta.fileName },
   });
   return key;
+}
+
+export async function persistResumeFile(
+  db: D1Database,
+  bucket: R2Bucket,
+  userId: string,
+  input: { bytes: Uint8Array; contentType: string; sourceLabel: string },
+): Promise<{ r2Key: string; fileName: string; contentType: string }> {
+  const fileName = resumeFileName(input.sourceLabel, input.contentType);
+  const r2Key = await putUserResume(bucket, userId, input.bytes, {
+    contentType: input.contentType,
+    fileName,
+  });
+  await upsertUserResume(db, {
+    userId,
+    r2Key,
+    contentType: input.contentType,
+    fileName,
+  });
+  return { r2Key, fileName, contentType: input.contentType };
 }
 
 export async function getUserResumeObject(

@@ -23,6 +23,7 @@ export function renderHelp(): string {
     "/help — show this message",
     "",
     "Save bookmarks a role. Apply submits Greenhouse jobs only after you confirm.",
+    "If we don’t have your resume file yet, Apply will ask you to upload a PDF or paste a URL.",
   ].join("\n");
 }
 

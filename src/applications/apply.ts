@@ -85,6 +85,7 @@ function finishStart(draft: ApplyDraft): ApplyStartResult {
 
 export async function startGreenhouseApply(options: {
   db: D1Database;
+  resumes?: R2Bucket;
   job: JobRow;
   userId: string;
   profile: CandidateProfile;
@@ -102,6 +103,10 @@ export async function startGreenhouseApply(options: {
 
   const resumeRow = await getUserResume(options.db, options.userId);
   if (!resumeRow) return { kind: "no_resume" };
+  if (options.resumes) {
+    const object = await getUserResumeObject(options.resumes, resumeRow.r2_key);
+    if (!object) return { kind: "no_resume" };
+  }
 
   let application = await getApplicationByJobId(options.db, options.job.id, options.userId);
   if (application?.status === "submitted") {

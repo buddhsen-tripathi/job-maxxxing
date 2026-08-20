@@ -161,10 +161,16 @@ export async function resumeBytesToText(
   return { text, sourceLabel, contentType: contentType || "text/plain", bytes };
 }
 
-export async function fetchResumeFromUrl(
+export interface ResumeBytesResult {
+  bytes: Uint8Array;
+  sourceLabel: string;
+  contentType: string;
+}
+
+export async function fetchResumeBytesFromUrl(
   url: string,
   fetchImpl: typeof fetch = globalThis.fetch,
-): Promise<ResumeTextResult> {
+): Promise<ResumeBytesResult> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -211,17 +217,28 @@ export async function fetchResumeFromUrl(
   }
 
   const bytes = await readBodyCapped(current, MAX_BYTES);
+  if (bytes.byteLength === 0) {
+    throw new AppError("resume_empty", "Resume file was empty");
+  }
   const contentType = current.headers.get("content-type") ?? "";
-  return resumeBytesToText(bytes, contentType, finalUrl.toString());
+  return { bytes, sourceLabel: finalUrl.toString(), contentType };
 }
 
-export async function downloadTelegramFile(options: {
+export async function fetchResumeFromUrl(
+  url: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<ResumeTextResult> {
+  const raw = await fetchResumeBytesFromUrl(url, fetchImpl);
+  return resumeBytesToText(raw.bytes, raw.contentType, raw.sourceLabel);
+}
+
+export async function downloadTelegramFileBytes(options: {
   token: string;
   fileId: string;
   fileName?: string;
   mimeType?: string;
   fetchImpl?: typeof fetch;
-}): Promise<ResumeTextResult> {
+}): Promise<ResumeBytesResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const metaResponse = await fetchWithTimeout(
     fetchImpl,
@@ -257,11 +274,25 @@ export async function downloadTelegramFile(options: {
     );
   }
   const bytes = await readBodyCapped(fileResponse, MAX_BYTES);
+  if (bytes.byteLength === 0) {
+    throw new AppError("resume_empty", "Resume file was empty");
+  }
   const label = options.fileName ?? meta.result.file_path;
   const contentType =
     options.mimeType ??
     (label.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
-  return resumeBytesToText(bytes, contentType, label);
+  return { bytes, sourceLabel: label, contentType };
+}
+
+export async function downloadTelegramFile(options: {
+  token: string;
+  fileId: string;
+  fileName?: string;
+  mimeType?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<ResumeTextResult> {
+  const raw = await downloadTelegramFileBytes(options);
+  return resumeBytesToText(raw.bytes, raw.contentType, raw.sourceLabel);
 }
 
 export function extractFirstUrl(text: string): string | null {

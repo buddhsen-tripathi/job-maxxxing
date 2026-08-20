@@ -2,7 +2,7 @@ import { env, fetchMock, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getApplicationByJobId } from "../../src/db/repositories/applications";
 import { insertJob } from "../../src/db/repositories/jobs";
-import { upsertUserResume } from "../../src/db/repositories/user-resumes";
+import { getUserResume, upsertUserResume } from "../../src/db/repositories/user-resumes";
 import identityQuestions from "../../src/sources/fixtures/greenhouse-questions.json";
 import extraQuestions from "../../src/sources/fixtures/greenhouse-questions-extra.json";
 import { must } from "../helpers";
@@ -210,5 +210,40 @@ describe("telegram apply flow", () => {
     });
     expect(String(calls.at(-1)?.body.text)).toContain("Can't submit this board yet");
     expect(greenhousePosts).toHaveLength(0);
+  });
+
+  it("asks for a resume file then continues apply after a URL upload", async () => {
+    await db.prepare("DELETE FROM user_resumes").run();
+    const job = await seedGreenhouseJob("4001");
+    await postWebhook({
+      update_id: 8,
+      callback_query: {
+        id: "cbq-missing-resume",
+        data: `job:apply:${job.id}`,
+        message: { message_id: 8, chat: { id: 12345 } },
+      },
+    });
+    expect(String(calls.at(-1)?.body.text)).toContain("Please upload a resume");
+
+    fetchMock
+      .get("https://files.example.com")
+      .intercept({ path: "/resume.txt", method: "GET" })
+      .reply(200, "Alex Example software engineer resume with enough text. ".repeat(3), {
+        headers: { "Content-Type": "text/plain" },
+      });
+
+    await postWebhook({
+      update_id: 9,
+      message: {
+        message_id: 9,
+        chat: { id: 12345 },
+        text: "https://files.example.com/resume.txt",
+      },
+    });
+    expect(String(calls.filter((c) => c.method === "sendMessage").at(-1)?.body.text)).toContain(
+      "Ready to apply",
+    );
+    const stored = must(await getUserResume(db, "default"));
+    expect(stored.file_name).toBe("resume.txt");
   });
 });

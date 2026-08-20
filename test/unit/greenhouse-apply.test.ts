@@ -9,6 +9,7 @@ import { parseCandidateProfile } from "../../src/candidate/profile";
 import { resumeFileName } from "../../src/resume/store";
 import identityQuestions from "../../src/sources/fixtures/greenhouse-questions.json";
 import extraQuestions from "../../src/sources/fixtures/greenhouse-questions-extra.json";
+import { isApplySessionState } from "../../src/telegram/apply";
 import { parseCallbackData } from "../../src/telegram/callbacks";
 
 const profile = parseCandidateProfile(candidateProfileExample);
@@ -118,5 +119,13 @@ describe("parseCallbackData apply actions", () => {
     expect(parseCallbackData(`job:apply:${id}`)).toEqual({ type: "apply", jobId: id });
     expect(parseCallbackData(`job:confirm:${id}`)).toEqual({ type: "confirm", jobId: id });
     expect(parseCallbackData(`job:cancel:${id}`)).toEqual({ type: "cancel", jobId: id });
+  });
+});
+
+describe("isApplySessionState", () => {
+  it("includes resume upload wait", () => {
+    expect(isApplySessionState("applying_resume")).toBe(true);
+    expect(isApplySessionState("applying_ask")).toBe(true);
+    expect(isApplySessionState("ready")).toBe(false);
   });
 });

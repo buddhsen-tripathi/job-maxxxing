@@ -169,7 +169,8 @@ export type UserSessionState =
   | "ask_authorization"
   | "ready"
   | "applying_ask"
-  | "applying_confirm";
+  | "applying_confirm"
+  | "applying_resume";
 
 export interface UserResumeRow {
   user_id: string;
