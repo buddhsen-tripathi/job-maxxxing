@@ -16,10 +16,9 @@ describe("parseBotCommand", () => {
     expect(parseBotCommand("/skipped")).toEqual({ type: "skipped" });
   });
 
-  it("parses pause/stop and resume aliases", () => {
+  it("parses pause and resume aliases", () => {
     expect(parseBotCommand("/pause")).toEqual({ type: "pause" });
     expect(parseBotCommand("/stop")).toEqual({ type: "pause" });
-    expect(parseBotCommand("/stop@jmaxxxingbot")).toEqual({ type: "pause" });
     expect(parseBotCommand("/resume")).toEqual({ type: "resume" });
     expect(parseBotCommand("/unpause")).toEqual({ type: "resume" });
   });

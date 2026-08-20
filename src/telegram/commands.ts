@@ -101,7 +101,7 @@ export async function resumeDigests(
   if (user?.active === 1) {
     await client.sendMessage({
       chatId,
-      text: "Already active. /pause or /stop to halt digests.",
+      text: "Already active. /pause to halt digests.",
     });
     return;
   }
@@ -109,7 +109,7 @@ export async function resumeDigests(
   await clearUserSession(db, userId);
   await client.sendMessage({
     chatId,
-    text: "Resumed. Digests about every 3 hours. /pause or /stop to halt them.",
+    text: "Resumed. Digests about every 3 hours. /pause to halt them.",
   });
 }
 
@@ -154,7 +154,6 @@ export const BOT_COMMANDS = [
   { command: "skipped", description: "List skipped jobs with apply links" },
   { command: "status", description: "Show onboarding / account status" },
   { command: "pause", description: "Pause job digests" },
-  { command: "stop", description: "Stop job digests (same as /pause)" },
   { command: "resume", description: "Resume job digests" },
   { command: "restart", description: "Rebuild profile from a new resume" },
   { command: "help", description: "Show how to use the bot" },

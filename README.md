@@ -154,7 +154,7 @@ Slash commands (also in the bot menu):
 | --- | --- |
 | `/saved` | List saved jobs with clickable apply links |
 | `/skipped` | List skipped jobs with apply links |
-| `/pause` / `/stop` | Halt job digests; profile and saved jobs are kept |
+| `/pause` | Halt job digests; profile and saved jobs are kept |
 | `/resume` | Turn digests back on |
 | `/help` | Show how to use the bot |
 

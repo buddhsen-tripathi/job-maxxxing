@@ -25,13 +25,12 @@ import type { TelegramClient } from "./client";
 const WELCOME = [
   "<b>Welcome to job-maxxing</b>",
   "",
-  "I match public ATS jobs to your profile and send digests on Telegram.",
+  "To get started, send your resume now:",
+  "• Upload a <b>PDF</b> in this chat, or",
+  "• Paste a <b>public resume link</b> (PDF, text, or HTML)",
+  "",
+  "I’ll extract your profile, ask a few search preferences, then send matching jobs here (about every 3 hours).",
   "Applications are never auto-submitted.",
-  "",
-  "Send a <b>public resume URL</b> (PDF or text/HTML), or upload a <b>PDF</b> here.",
-  "Then I’ll ask a few search preferences.",
-  "",
-  "Commands: /start · /status · /pause · /resume · /restart · /help",
 ].join("\n");
 
 export function isOnboardingInProgress(session: UserSessionRow | null): boolean {
@@ -209,7 +208,7 @@ export async function handleOnboardingMessage(options: {
     let statusText: string;
     if (user.active === 1) {
       statusText =
-        "You’re active. Digests will use your saved profile.\n/pause or /stop to halt digests.\n/restart to re-onboard.";
+        "You’re active. Digests will use your saved profile.\n/pause to halt digests.\n/restart to re-onboard.";
     } else if (profile && !midOnboarding) {
       statusText =
         "Paused. No digests until /resume.\nProfile and saved jobs are kept.\n/restart to rebuild your profile.";
@@ -246,7 +245,7 @@ export async function handleOnboardingMessage(options: {
         if (!mime.includes("pdf") && !name.endsWith(".pdf")) {
           await client.sendMessage({
             chatId,
-            text: "Please upload a PDF, or paste a public resume URL.",
+            text: "Please upload a PDF in this chat, or paste a public resume URL.",
           });
           return { handled: true };
         }
@@ -261,7 +260,7 @@ export async function handleOnboardingMessage(options: {
         if (!url) {
           await client.sendMessage({
             chatId,
-            text: "Send a public https resume URL, or upload a PDF document.",
+            text: "To continue, upload a PDF in this chat, or paste a public resume URL.",
           });
           return { handled: true };
         }
@@ -394,7 +393,7 @@ export async function handleOnboardingMessage(options: {
             `Locations: ${profile.preferences.locations.join(", ")}`,
             "",
             "You’ll get digests when new roles match (about every 3 hours).",
-            "Use /saved and /skipped anytime. /pause or /stop to halt digests. /restart to rebuild your profile.",
+            "Use /saved and /skipped anytime. /pause to halt digests. /restart to rebuild your profile.",
           ].join("\n"),
         });
       } catch (error) {

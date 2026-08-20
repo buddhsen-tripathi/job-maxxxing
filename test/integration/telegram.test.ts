@@ -183,7 +183,7 @@ describe("telegram slash commands", () => {
     calls.length = 0;
     const already = await postWebhook({
       update_id: 11,
-      message: { message_id: 11, chat: { id: 12345 }, text: "/stop" },
+      message: { message_id: 11, chat: { id: 12345 }, text: "/pause" },
     });
     expect(already.status).toBe(200);
     expect(String(calls.at(-1)?.body.text)).toContain("Already paused");

@@ -17,7 +17,7 @@ export function renderHelp(): string {
     "/saved — list saved jobs with apply links",
     "/skipped — list skipped jobs with apply links",
     "/status — onboarding / digest status",
-    "/pause or /stop — halt job digests (profile is kept)",
+    "/pause — halt job digests (profile is kept)",
     "/resume — turn digests back on",
     "/restart — rebuild profile from a new resume",
     "/help — show this message",

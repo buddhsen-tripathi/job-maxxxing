@@ -28,7 +28,6 @@ curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommand
       {"command": "skipped", "description": "List skipped jobs with apply links"},
       {"command": "status", "description": "Show onboarding / account status"},
       {"command": "pause", "description": "Pause job digests"},
-      {"command": "stop", "description": "Stop job digests (same as /pause)"},
       {"command": "resume", "description": "Resume job digests"},
       {"command": "restart", "description": "Rebuild profile from a new resume"},
       {"command": "help", "description": "Show how to use the bot"}
