@@ -10,6 +10,7 @@ import { getUserSession } from "../db/repositories/user-sessions";
 import { ensureTelegramUser, getUserProfile, loadProfileForUser } from "../db/repositories/users";
 import type { Env } from "../env";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
+import { handleApplyMessage, isApplySessionState } from "../telegram/apply";
 import { handleCallbackQuery } from "../telegram/callbacks";
 import { createTelegramClient } from "../telegram/client";
 import { handleBotCommand, parseBotCommand, resumeDigests } from "../telegram/commands";
@@ -127,6 +128,7 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
       userId: user.id,
       ...(profile ? { profile } : {}),
       ...(llm ? { llm } : {}),
+      resumes: c.env.RESUMES,
     });
     return c.json({ ok: true });
   }
@@ -153,6 +155,25 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
   }
 
   const knownBotCommand = text ? parseBotCommand(text) : null;
+
+  if (text && !knownBotCommand && !isOnboardingCommand(text)) {
+    const applySession = await getUserSession(c.env.DB, user.id);
+    if (applySession && isApplySessionState(applySession.state)) {
+      const profile = await loadProfileForUser(c.env.DB, user.id);
+      if (profile) {
+        const apply = await handleApplyMessage({
+          db: c.env.DB,
+          client,
+          chatId: chatIdStr,
+          userId: user.id,
+          profile,
+          text,
+        });
+        if (apply.handled) return c.json({ ok: true });
+      }
+    }
+  }
+
   const session = user.active !== 1 ? await getUserSession(c.env.DB, user.id) : null;
   const awaitingOnboarding =
     user.active !== 1 &&
@@ -186,6 +207,7 @@ export const telegramWebhook = new Hono<{ Bindings: Env }>().post("/", async (c)
         : {}),
       botToken: secrets.TELEGRAM_BOT_TOKEN,
       llm,
+      resumes: c.env.RESUMES,
     });
     if (onboarding.handled) return c.json({ ok: true });
   }

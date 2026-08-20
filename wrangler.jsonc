@@ -15,6 +15,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "RESUMES",
+      "bucket_name": "job-maxxing-resumes"
+    }
+  ],
   "vars": {
     "ENVIRONMENT": "production",
     // Set APP_BASE_URL outside git (Dashboard vars or `wrangler secret put APP_BASE_URL`).

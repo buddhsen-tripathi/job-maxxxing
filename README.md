@@ -4,8 +4,8 @@ Personal job-search agent on Cloudflare Workers. Polls public ATS boards
 (Greenhouse, Lever, Ashby, Workday), upserts new roles into D1, hard-filters and
 LLM-scores them against each user’s candidate profile, and sends a Telegram digest
 every **3 hours**. Anyone can DM the bot, upload a resume URL (or PDF), set
-preferences, and receive matches. Applications can be **prepared** for review but
-are **never auto-submitted**.
+preferences, and receive matches. Greenhouse applications can be submitted from
+Telegram after you confirm a prepared summary. Other boards stay “open listing”.
 
 ## How it works
 
@@ -19,8 +19,8 @@ Cron (0 */3 * * *)
 ```
 
 Anyone who DMs the bot can onboard: send a **public resume URL** (PDF/text/HTML)
-or upload a **PDF**, answer preference prompts, then receive digests. Use **Save** /
-Skip / Review / Prepare on cards. `/saved` lists your saved jobs with apply links.
+or upload a **PDF**, answer preference prompts, then receive digests. Use **Apply** /
+Save / Skip on cards. `/saved` lists your saved jobs with apply links.
 
 ## Stack
 
@@ -158,8 +158,9 @@ Slash commands (also in the bot menu):
 | `/resume` | Turn digests back on |
 | `/help` | Show how to use the bot |
 
-Digest / review buttons: **Save**, Skip, Review, Prepare, Open listing.
-Save bookmarks a role; Prepare drafts answers — nothing is auto-submitted.
+Digest / review buttons: **Apply**, Save, Skip, Open listing.
+Save bookmarks a role. Apply prepares a Greenhouse application, asks any
+required unknowns, then submits only after **Confirm apply**.
 
 ## Production deployment
 
@@ -171,6 +172,9 @@ bunx wrangler d1 create job-maxxing
 
 # 2. Apply migrations
 bunx wrangler d1 migrations apply job-maxxing --remote
+
+# 2b. Resume bucket (Greenhouse apply attachments)
+bunx wrangler r2 bucket create job-maxxing-resumes
 
 # 3. Secrets
 for s in TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_ALLOWED_CHAT_ID \
@@ -236,11 +240,10 @@ Common hard-filter rejects (by design): `unsupported_location`,
 
 ## Notes
 
-- Never auto-submits applications. Prepared answers are marked verified /
-  derived / unknown; demographic questions stay unanswered.
-- Schema is multi-tenant-ready (`users`, `user_profiles`) with a single default
-  operator in production today. Auth/billing UI is out of scope until
-  ingest + notify stay stable at catalog scale.
+- Greenhouse applications submit only after **Confirm apply**. Unknown required
+  questions are asked in chat and reused. Lever / Ashby / Workday stay Open listing.
+- Resumes are stored in R2 (`RESUMES` binding, bucket `job-maxxing-resumes`) as the
+  file attached on apply. Structured profile JSON stays in D1.
 
 ## License
 

@@ -22,7 +22,7 @@ export function renderHelp(): string {
     "/restart — rebuild profile from a new resume",
     "/help — show this message",
     "",
-    "Save bookmarks a role. Prepare drafts answers — nothing is auto-submitted.",
+    "Save bookmarks a role. Apply submits Greenhouse jobs only after you confirm.",
   ].join("\n");
 }
 
@@ -65,7 +65,7 @@ export function renderJobListItem(
   ].join("\n");
   const buttons: InlineButton[][] = [
     [
-      { text: "Review", callbackData: `job:review:${job.id}` },
+      { text: "Apply", callbackData: `job:apply:${job.id}` },
       { text: "Prepare", callbackData: `job:prepare:${job.id}` },
       { text: "Open", url: job.apply_url },
     ],
@@ -139,7 +139,7 @@ export function renderJobCard(
   }
   const buttons: InlineButton[][] = [
     [
-      { text: "Review", callbackData: `job:review:${job.id}` },
+      { text: "Apply", callbackData: `job:apply:${job.id}` },
       { text: "Save", callbackData: `job:shortlist:${job.id}` },
       { text: "Skip", callbackData: `job:skip:${job.id}` },
     ],
@@ -179,7 +179,7 @@ export function renderReviewCard(scored: ScoredJob): {
   }
   lines.push(escapeHtml(job.apply_url));
   const buttons: InlineButton[][] = [
-    [{ text: "Prepare application", callbackData: `job:prepare:${job.id}` }],
+    [{ text: "Apply", callbackData: `job:apply:${job.id}` }],
     [
       { text: "Save", callbackData: `job:shortlist:${job.id}` },
       { text: "Skip", callbackData: `job:skip:${job.id}` },
@@ -215,7 +215,6 @@ export function renderPreparationSummary(prepared: {
     buttons: [
       [{ text: "Review answers", callbackData: `job:answers:${prepared.jobId}` }],
       [{ text: "Open application", url: prepared.applyUrl }],
-      [{ text: "Cancel", callbackData: `job:back:${prepared.jobId}` }],
     ],
   };
 }

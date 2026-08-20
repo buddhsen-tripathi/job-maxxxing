@@ -5,6 +5,7 @@ import {
   renderDraftSummary,
 } from "../candidate/extract-profile";
 import type { SearchPreferences } from "../candidate/preferences";
+import { upsertUserResume } from "../db/repositories/user-resumes";
 import {
   clearUserSession,
   getUserSession,
@@ -19,6 +20,7 @@ import {
   fetchResumeFromUrl,
   type ResumeTextResult,
 } from "../resume/fetch";
+import { putUserResume, resumeFileName } from "../resume/store";
 import { errorMessage } from "../shared/errors";
 import type { TelegramClient } from "./client";
 
@@ -30,11 +32,13 @@ const WELCOME = [
   "• Paste a <b>public resume link</b> (PDF, text, or HTML)",
   "",
   "I’ll extract your profile, ask a few search preferences, then send matching jobs here (about every 3 hours).",
-  "Applications are never auto-submitted.",
+  "Nothing is submitted until you tap Confirm apply.",
 ].join("\n");
 
 export function isOnboardingInProgress(session: UserSessionRow | null): boolean {
-  return Boolean(session && session.state !== "ready");
+  if (!session || session.state === "ready") return false;
+  if (session.state === "applying_ask" || session.state === "applying_confirm") return false;
+  return true;
 }
 
 function parseDraft(raw: string | null): OnboardingDraft | null {
@@ -192,6 +196,7 @@ export async function handleOnboardingMessage(options: {
   };
   botToken: string;
   llm: LlmClient;
+  resumes?: R2Bucket;
 }): Promise<{ handled: boolean }> {
   const { db, client, user, chatId, llm } = options;
   const session = await getUserSession(db, user.id);
@@ -221,6 +226,11 @@ export async function handleOnboardingMessage(options: {
       text: statusText,
     });
     return { handled: true };
+  }
+
+  // Apply Q&A is handled separately.
+  if (session?.state === "applying_ask" || session?.state === "applying_confirm") {
+    return { handled: false };
   }
 
   // Already onboarded and not mid-wizard → let commands handle /help etc.
@@ -268,6 +278,20 @@ export async function handleOnboardingMessage(options: {
       } else {
         await client.sendMessage({ chatId, text: WELCOME });
         return { handled: true };
+      }
+
+      if (options.resumes) {
+        const fileName = resumeFileName(resume.sourceLabel, resume.contentType);
+        const key = await putUserResume(options.resumes, user.id, resume.bytes, {
+          contentType: resume.contentType,
+          fileName,
+        });
+        await upsertUserResume(db, {
+          userId: user.id,
+          r2Key: key,
+          contentType: resume.contentType,
+          fileName,
+        });
       }
 
       await extractAndStartPrefs(db, client, user, llm, resume, chatId);

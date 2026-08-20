@@ -32,6 +32,7 @@ export async function prepareApplication(
   db: D1Database,
   input: {
     jobId: string;
+    userId?: string;
     profile: CandidateProfile;
     llm?: LlmClient;
     questions?: string[];
@@ -43,9 +44,10 @@ export async function prepareApplication(
     throw new AppError("job_not_found", `Job ${input.jobId} does not exist.`);
   }
 
-  let application = await getApplicationByJobId(db, job.id);
+  const userId = input.userId ?? "default";
+  let application = await getApplicationByJobId(db, job.id, userId);
   if (!application) {
-    application = await createApplication(db, { jobId: job.id, now: input.now });
+    application = await createApplication(db, { jobId: job.id, userId, now: input.now });
   }
   if (!application) {
     throw new AppError("preparation_failed", `Could not create application for job ${job.id}.`);

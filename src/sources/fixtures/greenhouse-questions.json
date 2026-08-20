@@ -1,0 +1,30 @@
+{
+  "id": 4001,
+  "questions": [
+    {
+      "label": "First Name",
+      "required": true,
+      "fields": [{ "name": "first_name", "type": "input_text", "required": true }]
+    },
+    {
+      "label": "Last Name",
+      "required": true,
+      "fields": [{ "name": "last_name", "type": "input_text", "required": true }]
+    },
+    {
+      "label": "Email",
+      "required": true,
+      "fields": [{ "name": "email", "type": "input_email", "required": true }]
+    },
+    {
+      "label": "Resume/CV",
+      "required": true,
+      "fields": [{ "name": "resume", "type": "input_file", "required": true }]
+    },
+    {
+      "label": "LinkedIn Profile",
+      "required": false,
+      "fields": [{ "name": "linkedin", "type": "input_text", "required": false }]
+    }
+  ]
+}

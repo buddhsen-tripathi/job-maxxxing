@@ -8,16 +8,17 @@ import { normalizeCompany } from "../jobs/fingerprint";
 import { getScoredJob } from "../jobs/scoring";
 import type { LlmClient } from "../llm/client";
 import { errorMessage } from "../shared/errors";
+import { beginApply, cancelApply, confirmApply } from "./apply";
 import type { TelegramClient } from "./client";
 import {
   renderAnswersReview,
   renderBlockConfirmation,
+  renderJobCard,
   renderPreparationSummary,
-  renderReviewCard,
 } from "./digest";
 
 const CALLBACK_PATTERN =
-  /^job:(review|shortlist|skip|block|blockconfirm|back|prepare|answers):([0-9a-f-]{36})$/;
+  /^job:(review|shortlist|skip|block|blockconfirm|back|prepare|answers|apply|confirm|cancel):([0-9a-f-]{36})$/;
 
 export type CallbackActionType =
   | "review"
@@ -27,7 +28,10 @@ export type CallbackActionType =
   | "blockconfirm"
   | "back"
   | "prepare"
-  | "answers";
+  | "answers"
+  | "apply"
+  | "confirm"
+  | "cancel";
 
 export interface CallbackAction {
   type: CallbackActionType;
@@ -51,6 +55,7 @@ export interface CallbackDeps {
   userId: string;
   profile?: CandidateProfile;
   llm?: LlmClient;
+  resumes?: R2Bucket;
 }
 
 export async function handleCallbackQuery(
@@ -78,6 +83,8 @@ export async function handleCallbackQuery(
     return;
   }
 
+  const chatIdStr = String(chatId);
+
   switch (action.type) {
     case "review": {
       const scored = await getScoredJob(db, job.id, deps.userId);
@@ -85,8 +92,8 @@ export async function handleCallbackQuery(
         await client.answerCallbackQuery(query.id, "No score available for this job yet.");
         return;
       }
-      const card = renderReviewCard(scored);
-      await client.sendMessage({ chatId: String(chatId), text: card.text, buttons: card.buttons });
+      const card = renderJobCard(1, scored);
+      await client.sendMessage({ chatId: chatIdStr, text: card.text, buttons: card.buttons });
       await client.answerCallbackQuery(query.id);
       return;
     }
@@ -152,7 +159,7 @@ export async function handleCallbackQuery(
       }
       const confirmation = renderBlockConfirmation(job.id, job.company);
       await client.editMessageText({
-        chatId: String(chatId),
+        chatId: chatIdStr,
         messageId,
         text: confirmation.text,
         buttons: confirmation.buttons,
@@ -182,7 +189,7 @@ export async function handleCallbackQuery(
         payload: { company: job.company, source: "telegram", userId: deps.userId },
       });
       await client.editMessageText({
-        chatId: String(chatId),
+        chatId: chatIdStr,
         messageId,
         text: `Blocked ${job.company}. Future runs will filter out this company.`,
       });
@@ -193,9 +200,9 @@ export async function handleCallbackQuery(
     case "back": {
       const scored = await getScoredJob(db, job.id, deps.userId);
       if (scored) {
-        const card = renderReviewCard(scored);
+        const card = renderJobCard(1, scored);
         await client.editMessageText({
-          chatId: String(chatId),
+          chatId: chatIdStr,
           messageId,
           text: card.text,
           buttons: card.buttons,
@@ -205,14 +212,34 @@ export async function handleCallbackQuery(
       return;
     }
 
-    case "prepare": {
-      if (deps.userId !== "default") {
-        await client.answerCallbackQuery(
-          query.id,
-          "Prepare is operator-only until per-user apps ship.",
-        );
+    case "apply": {
+      await client.answerCallbackQuery(query.id);
+      if (!deps.profile) {
+        await client.sendMessage({
+          chatId: chatIdStr,
+          text: "No saved profile yet. Send /start to onboard.",
+        });
         return;
       }
+      try {
+        await beginApply({
+          db,
+          client,
+          chatId: chatIdStr,
+          job,
+          userId: deps.userId,
+          profile: deps.profile,
+        });
+      } catch (error) {
+        await client.sendMessage({
+          chatId: chatIdStr,
+          text: `Apply failed: ${errorMessage(error)}`,
+        });
+      }
+      return;
+    }
+
+    case "prepare": {
       if (!deps.profile) {
         await client.answerCallbackQuery(
           query.id,
@@ -223,6 +250,7 @@ export async function handleCallbackQuery(
       try {
         const prepared = await prepareApplication(db, {
           jobId: job.id,
+          userId: deps.userId,
           profile: deps.profile,
           ...(deps.llm ? { llm: deps.llm } : {}),
         });
@@ -237,7 +265,7 @@ export async function handleCallbackQuery(
           unknownCount: prepared.unresolvedQuestions.length,
         });
         await client.sendMessage({
-          chatId: String(chatId),
+          chatId: chatIdStr,
           text: summary.text,
           buttons: summary.buttons,
         });
@@ -248,12 +276,35 @@ export async function handleCallbackQuery(
       return;
     }
 
-    case "answers": {
-      if (deps.userId !== "default") {
-        await client.answerCallbackQuery(query.id, "Answers review is operator-only for now.");
+    case "confirm": {
+      await client.answerCallbackQuery(query.id, "Submitting…");
+      if (!deps.resumes) {
+        await client.sendMessage({
+          chatId: chatIdStr,
+          text: "Resume storage isn’t configured. Open the listing to apply manually.",
+          buttons: [[{ text: "Open listing", url: job.apply_url }]],
+        });
         return;
       }
-      const application = await getApplicationByJobId(db, job.id);
+      await confirmApply({
+        db,
+        resumes: deps.resumes,
+        client,
+        chatId: chatIdStr,
+        userId: deps.userId,
+        job,
+      });
+      return;
+    }
+
+    case "cancel": {
+      await client.answerCallbackQuery(query.id);
+      await cancelApply(db, client, chatIdStr, deps.userId);
+      return;
+    }
+
+    case "answers": {
+      const application = await getApplicationByJobId(db, job.id, deps.userId);
       if (!application?.prepared_answers_json) {
         await client.answerCallbackQuery(query.id, "No prepared application for this job.");
         return;
@@ -263,7 +314,7 @@ export async function handleCallbackQuery(
       >[0]["answers"];
       const review = renderAnswersReview({ jobId: job.id, answers });
       await client.sendMessage({
-        chatId: String(chatId),
+        chatId: chatIdStr,
         text: review.text,
         buttons: review.buttons,
       });

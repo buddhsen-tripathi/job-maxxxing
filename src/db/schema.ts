@@ -95,6 +95,7 @@ export interface BlockedCompanyRow {
 
 export interface ApplicationRow {
   id: string;
+  user_id: string;
   job_id: string;
   status: ApplicationStatus;
   resume_variant: string | null;
@@ -166,7 +167,17 @@ export type UserSessionState =
   | "ask_workplace"
   | "ask_salary"
   | "ask_authorization"
-  | "ready";
+  | "ready"
+  | "applying_ask"
+  | "applying_confirm";
+
+export interface UserResumeRow {
+  user_id: string;
+  r2_key: string;
+  content_type: string;
+  file_name: string;
+  updated_at: string;
+}
 
 export interface UserSessionRow {
   user_id: string;

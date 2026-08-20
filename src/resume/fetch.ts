@@ -9,6 +9,7 @@ export interface ResumeTextResult {
   text: string;
   sourceLabel: string;
   contentType: string;
+  bytes: Uint8Array;
 }
 
 function truncateText(text: string): string {
@@ -142,7 +143,7 @@ export async function resumeBytesToText(
       if (text.length < 40) {
         throw new AppError("resume_unreadable", "Could not extract enough text from PDF");
       }
-      return { text, sourceLabel, contentType: "application/pdf" };
+      return { text, sourceLabel, contentType: "application/pdf", bytes };
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError("resume_pdf_parse_failed", `PDF parse failed: ${errorMessage(error)}`);
@@ -157,7 +158,7 @@ export async function resumeBytesToText(
   if (text.length < 40) {
     throw new AppError("resume_unreadable", "Could not extract enough text from resume");
   }
-  return { text, sourceLabel, contentType: contentType || "text/plain" };
+  return { text, sourceLabel, contentType: contentType || "text/plain", bytes };
 }
 
 export async function fetchResumeFromUrl(

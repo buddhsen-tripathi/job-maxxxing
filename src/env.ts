@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  RESUMES: R2Bucket;
   JOB_SEARCH_WORKFLOW?: Workflow;
 
   TELEGRAM_BOT_TOKEN?: string;

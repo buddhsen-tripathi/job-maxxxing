@@ -375,7 +375,7 @@ export async function runUserMatchAndNotify(
     const previouslySkipped = options.dryRun
       ? false
       : await userHasSkippedJob(env.DB, options.userId, row.id);
-    // Applications are still global; do not treat another user's prepare as applied.
+    // Applications are per-user; do not treat another user's prepare as applied.
     const filter = applyHardFilters(row, {
       preferences: options.profile.preferences,
       profile: options.profile,

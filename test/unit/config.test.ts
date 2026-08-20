@@ -5,6 +5,7 @@ import type { Env } from "../../src/env";
 function baseEnv(overrides: Partial<Env> = {}): Env {
   return {
     DB: {} as D1Database,
+    RESUMES: {} as R2Bucket,
     APP_BASE_URL: "http://localhost:8787",
     ENVIRONMENT: "development",
     ...overrides,

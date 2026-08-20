@@ -72,6 +72,7 @@ export const jobs = new Hono<{ Bindings: Env }>()
       const prepared = await prepareApplication(c.env.DB, {
         jobId: job.id,
         profile: await loadCandidateProfile(c.env),
+        userId: "default",
       });
       return c.json({ prepared });
     } catch (error) {
