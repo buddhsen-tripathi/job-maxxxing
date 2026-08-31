@@ -34,7 +34,14 @@ beforeAll(() => {
 afterAll(() => fetchMock.deactivate());
 
 beforeEach(async () => {
-  for (const table of ["applications", "job_actions", "job_scores", "jobs", "audit_events"]) {
+  for (const table of [
+    "applications",
+    "job_actions",
+    "job_scores",
+    "pending_matches",
+    "jobs",
+    "audit_events",
+  ]) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
   calls.length = 0;

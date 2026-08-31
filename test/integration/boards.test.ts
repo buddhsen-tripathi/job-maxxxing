@@ -67,6 +67,27 @@ describe("ats_boards repository", () => {
     expect(again.company_name).toBe("Ramp Inc");
   });
 
+  it("round-robins providers when filling a mixed catalog", async () => {
+    for (const [provider, slug] of [
+      ["greenhouse", "gh-1"],
+      ["greenhouse", "gh-2"],
+      ["greenhouse", "gh-3"],
+      ["lever", "lv-1"],
+      ["lever", "lv-2"],
+      ["ashby", "as-1"],
+    ] as const) {
+      await upsertAtsBoard(db, {
+        provider,
+        slug,
+        companyName: slug,
+        tier: "standard",
+      });
+    }
+    const selected = await selectBoardsForIngest(db, { batchSize: 6, priorityCap: 0 });
+    expect(selected).toHaveLength(6);
+    expect(selected.map((b) => b.provider).slice(0, 3)).toEqual(["ashby", "greenhouse", "lever"]);
+  });
+
   it("maps boards to source entries", () => {
     expect(
       boardToSourceEntry({

@@ -28,6 +28,7 @@ async function clearTables() {
       db.prepare("DELETE FROM job_actions"),
       db.prepare("DELETE FROM job_scores"),
       db.prepare("DELETE FROM applications"),
+      db.prepare("DELETE FROM pending_matches"),
       db.prepare("DELETE FROM jobs"),
       db.prepare("DELETE FROM runs"),
     ])

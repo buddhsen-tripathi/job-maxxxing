@@ -5,9 +5,36 @@ import type { AtsBoardRow, AtsBoardTier, AtsProvider } from "../schema";
 export type { AtsBoardRow, AtsBoardTier, AtsProvider };
 
 /** Default boards polled per cron tick (priority reserve + standard fill). */
-export const DEFAULT_BOARD_BATCH_SIZE = 48;
+export const DEFAULT_BOARD_BATCH_SIZE = 16;
 /** Max priority boards taken each tick so standard boards still rotate. */
-export const DEFAULT_PRIORITY_CAP = 16;
+export const DEFAULT_PRIORITY_CAP = 6;
+
+/**
+ * Round-robin across ATS providers so a tick is not all Greenhouse (or all
+ * of any one vendor) when many boards share the same last_polled_at.
+ */
+export function interleaveByProvider<T extends { provider: string }>(items: readonly T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const list = groups.get(item.provider) ?? [];
+    list.push(item);
+    groups.set(item.provider, list);
+  }
+  const queues = [...groups.values()];
+  const out: T[] = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const queue of queues) {
+      const next = queue.shift();
+      if (next) {
+        out.push(next);
+        added = true;
+      }
+    }
+  }
+  return out;
+}
 
 export interface UpsertAtsBoardInput {
   id?: string;
@@ -150,8 +177,9 @@ export async function selectBoardsForIngest(
     .all<AtsBoardRow>();
 
   const remaining = Math.max(0, batchSize - priority.results.length);
-  if (remaining === 0) return priority.results;
+  if (remaining === 0) return interleaveByProvider(priority.results);
 
+  const oversample = remaining * 4;
   if (priority.results.length === 0) {
     const rest = await db
       .prepare(
@@ -160,9 +188,9 @@ export async function selectBoardsForIngest(
          ORDER BY last_polled_at IS NOT NULL, last_polled_at ASC, company_name ASC
          LIMIT ?`,
       )
-      .bind(remaining)
+      .bind(oversample)
       .all<AtsBoardRow>();
-    return rest.results;
+    return interleaveByProvider(rest.results).slice(0, remaining);
   }
 
   const placeholders = priority.results.map(() => "?").join(", ");
@@ -173,10 +201,11 @@ export async function selectBoardsForIngest(
        ORDER BY last_polled_at IS NOT NULL, last_polled_at ASC, company_name ASC
        LIMIT ?`,
     )
-    .bind(...priority.results.map((b) => b.id), remaining)
+    .bind(...priority.results.map((b) => b.id), oversample)
     .all<AtsBoardRow>();
 
-  return [...priority.results, ...rest.results];
+  const mixedRest = interleaveByProvider(rest.results).slice(0, remaining);
+  return interleaveByProvider([...priority.results, ...mixedRest]);
 }
 
 export async function markBoardPolled(

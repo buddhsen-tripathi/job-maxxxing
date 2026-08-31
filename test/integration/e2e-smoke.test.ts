@@ -82,6 +82,7 @@ beforeEach(async () => {
     "job_actions",
     "job_scores",
     "applications",
+    "pending_matches",
     "jobs",
     "runs",
     "run_locks",

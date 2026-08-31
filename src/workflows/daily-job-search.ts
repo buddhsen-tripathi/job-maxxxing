@@ -7,18 +7,31 @@ import {
   parseTelegramSecrets,
   parseVars,
 } from "../config";
-import { markBoardPolled, selectBoardsForIngest } from "../db/repositories/boards";
+import { markBoardPolled } from "../db/repositories/boards";
 import {
+  clipJobDescription,
   getJobByFingerprint,
-  insertJobAction,
+  getLatestScoreForJob,
   insertJobScore,
+  persistDiscoveredJobs,
   setJobStatus,
-  upsertDiscoveredJob,
 } from "../db/repositories/jobs";
 import { listBlockedCompanyKeys } from "../db/repositories/meta";
-import { completeRun, createRun, failRun } from "../db/repositories/runs";
+import {
+  countPendingMatches,
+  deletePendingMatches,
+  listPendingMatchJobs,
+} from "../db/repositories/pending-matches";
+import {
+  acquireIngestMutex,
+  completeRun,
+  createRun,
+  failRun,
+  failStaleRuns,
+  releaseIngestMutex,
+} from "../db/repositories/runs";
 import { userHasSkippedJob } from "../db/repositories/user-jobs";
-import type { AtsBoardRow, JobRow } from "../db/schema";
+import type { JobRow } from "../db/schema";
 import type { Env } from "../env";
 import { discoverFromSources, type SourceFailure } from "../jobs/discover";
 import { applyHardFilters } from "../jobs/filters";
@@ -26,12 +39,20 @@ import { chooseDigestJobs, type ScoredJob, type ScoreThresholds, scoreJobs } fro
 import type { LlmClient } from "../llm/client";
 import { createMockLlmClient } from "../llm/mock";
 import { createOpenRouterLlmClient } from "../llm/openrouter";
+import { chunkArray } from "../shared/array";
 import { errorMessage } from "../shared/errors";
 import { createLogger, type Logger } from "../shared/logger";
-import { utcThreeHourSlotKey } from "../shared/time";
-import type { SourceEntry } from "../sources/source-adapter";
 import { createTelegramClient } from "../telegram/client";
 import { createTelegramNotifier } from "../telegram/notifier";
+
+/** Boards fetched concurrently before we checkpoint last_polled_at. */
+const INGEST_CHUNK_SIZE = 4;
+/** Leave headroom under the ~15 minute Worker scheduled limit. */
+export const DEFAULT_INGEST_BUDGET_MS = 8 * 60 * 1000;
+export const DEFAULT_MATCH_BUDGET_MS = 5 * 60 * 1000;
+const LEFTOVER_MATCH_BUDGET_MS = 2 * 60 * 1000;
+const RUN_HARD_STOP_MS = 13 * 60 * 1000;
+const PENDING_DRAIN_BATCH = 40;
 
 export interface DigestInput {
   runId: string;
@@ -86,6 +107,7 @@ export interface RunSummary {
   boardsPolled?: number;
   usersNotified?: number;
   filterRejects?: Record<string, number>;
+  pendingRemaining?: number;
   error?: string;
 }
 
@@ -104,14 +126,10 @@ export interface DailyRunOptions {
   standardBatchSize?: number;
   batchSize?: number;
   priorityCap?: number;
-}
-
-async function acquireRunLock(db: D1Database, slotKey: string, runId: string): Promise<boolean> {
-  const result = await db
-    .prepare("INSERT OR IGNORE INTO run_locks (date, run_id, created_at) VALUES (?, ?, ?)")
-    .bind(slotKey, runId, new Date().toISOString())
-    .run();
-  return result.meta.changes === 1;
+  /** Wall-clock budget for board polling. 0 skips ingest. */
+  ingestBudgetMs?: number;
+  /** Wall-clock budget for filter/score/notify of pending matches. */
+  matchBudgetMs?: number;
 }
 
 function resolveLlmClient(env: Env, override: LlmClient | undefined, logger: Logger): LlmClient {
@@ -192,7 +210,7 @@ function jobToRow(
     location: job.location ?? null,
     employment_type: job.employmentType ?? null,
     workplace_type: job.workplaceType,
-    description: job.description,
+    description: clipJobDescription(job.description),
     apply_url: job.applyUrl,
     canonical_url: job.canonicalUrl,
     salary_min: job.salary?.min ?? null,
@@ -201,7 +219,7 @@ function jobToRow(
     posted_at: job.postedAt ?? null,
     discovered_at: job.discoveredAt,
     last_seen_at: job.discoveredAt,
-    raw_payload: job.rawPayload === undefined ? null : JSON.stringify(job.rawPayload),
+    raw_payload: null,
     status: "discovered",
   };
 }
@@ -216,7 +234,9 @@ export interface BoardIngestResult {
 }
 
 /**
- * Poll a shard of ATS boards and upsert jobs. Only newly fingerprinted jobs are returned.
+ * Poll a shard of ATS boards in small concurrent chunks. Each chunk is
+ * checkpointed (`last_polled_at`) so a killed tick does not redo finished boards.
+ * New fingerprints are queued on `pending_matches` for a separate drain.
  */
 export async function runBoardIngest(
   env: Env,
@@ -224,6 +244,7 @@ export async function runBoardIngest(
     logger: Logger;
     now: Date;
     preferences: import("../candidate/preferences").SearchPreferences;
+    ingestDeadlineMs: number;
   },
 ): Promise<BoardIngestResult> {
   const loaded = await loadSourcesForIngest(env, {
@@ -236,58 +257,49 @@ export async function runBoardIngest(
     ...(options.sourceNames ? { sourceNames: options.sourceNames } : {}),
   });
 
-  // Pair board ids with entries when using catalog so we can mark poll status.
-  let boardsByCompany = new Map<string, AtsBoardRow>();
-  if (loaded.fromCatalog) {
-    const boards = await selectBoardsForIngest(env.DB, {
-      ...(options.batchSize !== undefined ? { batchSize: options.batchSize } : {}),
-      ...(options.priorityCap !== undefined ? { priorityCap: options.priorityCap } : {}),
-      ...(options.standardBatchSize !== undefined
-        ? { standardBatchSize: options.standardBatchSize }
-        : {}),
-    });
-    boardsByCompany = new Map(boards.map((b) => [`${b.provider}:${b.slug}`, b]));
-  }
-
-  const discovery = await discoverFromSources(
-    loaded.entries,
-    {
-      now: options.now,
-      preferences: options.preferences,
-      fetch: options.fetchImpl ?? globalThis.fetch,
-      logger: options.logger,
-    },
-    { ...(options.limit !== undefined ? { limit: options.limit } : {}) },
-  );
-
-  if (loaded.fromCatalog && !options.dryRun) {
-    const failureByCompany = new Map(
-      discovery.failures.map((f) => [`${f.source}:${f.company}`, f.error]),
-    );
-    for (const entry of loaded.entries) {
-      const key = sourceEntryKey(entry);
-      const board = boardsByCompany.get(key);
-      if (!board) continue;
-      const fail = failureByCompany.get(`${entry.source}:${entry.company}`);
-      await markBoardPolled(
-        env.DB,
-        board.id,
-        fail ? `error:${fail.slice(0, 120)}` : "ok",
-        options.now,
-      );
-    }
-  }
+  const pairs = loaded.entries.map((entry, index) => ({
+    entry,
+    boardId: loaded.boards[index]?.id,
+  }));
 
   const newJobs: JobRow[] = [];
-  if (options.dryRun) {
-    for (const job of discovery.jobs) {
-      const existing = await getJobByFingerprint(env.DB, job.fingerprint);
-      if (existing) continue;
-      newJobs.push(jobToRow(job, `dry-${job.fingerprint}`));
+  const sourceFailures: SourceFailure[] = [];
+  let discoveredCount = 0;
+  let sourcesChecked = 0;
+  let budgetHit = false;
+
+  for (const chunk of chunkArray(pairs, INGEST_CHUNK_SIZE)) {
+    if (Date.now() >= options.ingestDeadlineMs) {
+      budgetHit = true;
+      break;
     }
-  } else {
-    for (const job of discovery.jobs) {
-      const { job: row, isNew } = await upsertDiscoveredJob(env.DB, {
+
+    const discovery = await discoverFromSources(
+      chunk.map((pair) => pair.entry),
+      {
+        now: options.now,
+        preferences: options.preferences,
+        fetch: options.fetchImpl ?? globalThis.fetch,
+        logger: options.logger,
+      },
+      { ...(options.limit !== undefined ? { limit: options.limit } : {}) },
+    );
+    sourcesChecked += chunk.length;
+    discoveredCount += discovery.discoveredCount;
+    sourceFailures.push(...discovery.failures);
+
+    if (options.dryRun) {
+      for (const job of discovery.jobs) {
+        const existing = await getJobByFingerprint(env.DB, job.fingerprint);
+        if (existing) continue;
+        newJobs.push(jobToRow(job, `dry-${job.fingerprint}`));
+      }
+      continue;
+    }
+
+    const persisted = await persistDiscoveredJobs(
+      env.DB,
+      discovery.jobs.map((job) => ({
         fingerprint: job.fingerprint,
         source: job.source,
         sourceJobId: job.sourceJobId ?? null,
@@ -303,34 +315,48 @@ export async function runBoardIngest(
         salaryMax: job.salary?.max ?? null,
         salaryCurrency: job.salary?.currency ?? null,
         postedAt: job.postedAt ?? null,
-        rawPayload: job.rawPayload === undefined ? null : JSON.stringify(job.rawPayload),
         now: options.now,
-      });
-      if (isNew) newJobs.push(row);
+      })),
+    );
+    newJobs.push(...persisted.newJobs);
+
+    if (loaded.fromCatalog) {
+      const failureByCompany = new Map(
+        discovery.failures.map((failure) => [
+          `${failure.source}:${failure.company}`,
+          failure.error,
+        ]),
+      );
+      for (const pair of chunk) {
+        if (!pair.boardId) continue;
+        const fail = failureByCompany.get(`${pair.entry.source}:${pair.entry.company}`);
+        await markBoardPolled(
+          env.DB,
+          pair.boardId,
+          fail ? `error:${fail.slice(0, 120)}` : "ok",
+          options.now,
+        );
+      }
     }
   }
 
+  if (budgetHit) {
+    options.logger.info({
+      operation: "board_ingest",
+      status: "ingest_budget_hit",
+      sourcesChecked,
+      remaining: pairs.length - sourcesChecked,
+    });
+  }
+
   return {
-    sourcesChecked: loaded.entries.length,
-    discoveredCount: discovery.discoveredCount,
+    sourcesChecked,
+    discoveredCount,
     newJobs,
-    sourceFailures: discovery.failures,
-    boardIds: loaded.boardIds,
+    sourceFailures,
+    boardIds: loaded.boards.map((board) => board.id),
     fromCatalog: loaded.fromCatalog,
   };
-}
-
-function sourceEntryKey(entry: SourceEntry): string {
-  switch (entry.source) {
-    case "greenhouse":
-      return `greenhouse:${entry.boardToken}`;
-    case "lever":
-      return `lever:${entry.account}`;
-    case "ashby":
-      return `ashby:${entry.boardSlug}`;
-    case "workday":
-      return `workday:${entry.host}/${entry.tenant}/${entry.site}`;
-  }
 }
 
 export interface UserMatchResult {
@@ -360,6 +386,8 @@ export async function runUserMatchAndNotify(
     llmClient?: LlmClient;
     notifier?: DigestNotifier;
     thresholds?: ScoreThresholds;
+    /** When false, skip the empty-digest Telegram notice (caller may send one later). */
+    sendNoMatches?: boolean;
   },
 ): Promise<UserMatchResult> {
   const llm = resolveLlmClient(env, options.llmClient, options.logger);
@@ -372,6 +400,10 @@ export async function runUserMatchAndNotify(
   const scoreCap = Math.max(1, Number(env.SCORE_CAP_PER_USER ?? "20") || 20);
 
   for (const row of options.newJobs) {
+    if (!options.dryRun) {
+      const alreadyScored = await getLatestScoreForJob(env.DB, row.id, options.userId);
+      if (alreadyScored) continue;
+    }
     const previouslySkipped = options.dryRun
       ? false
       : await userHasSkippedJob(env.DB, options.userId, row.id);
@@ -385,22 +417,6 @@ export async function runUserMatchAndNotify(
     });
 
     if (!options.dryRun) {
-      await insertJobAction(env.DB, {
-        jobId: row.id,
-        action: filter.eligible ? "filter_passed" : "filter_rejected",
-        source: "system",
-        metadataJson: JSON.stringify(
-          filter.eligible
-            ? { warnings: filter.warnings, userId: options.userId }
-            : {
-                reasonCode: filter.reasonCode,
-                explanation: filter.explanation,
-                userId: options.userId,
-              },
-        ),
-        now: options.now,
-      });
-      // Catalog status is best-effort; matching is per-user and does not depend on it.
       await setJobStatus(env.DB, row.id, filter.eligible ? "eligible" : "rejected_by_filter");
     }
 
@@ -454,7 +470,7 @@ export async function runUserMatchAndNotify(
     };
     if (digestJobs.length > 0) {
       await notifier.sendDailyDigest({ ...digestBase, jobs: digestJobs });
-    } else {
+    } else if (options.sendNoMatches !== false) {
       await notifier.sendNoMatchesNotice(digestBase);
     }
   }
@@ -469,7 +485,84 @@ export async function runUserMatchAndNotify(
 }
 
 /**
+ * Filter/score a slice of pending_matches for every active user, then drop those
+ * jobs from the queue so a killed tick can retry whatever is left.
+ */
+async function drainPendingMatches(
+  env: Env,
+  options: {
+    users: Awaited<ReturnType<typeof loadActiveProfiles>>;
+    runId: string;
+    now: Date;
+    sourcesChecked: number;
+    discoveredCount: number;
+    logger: Logger;
+    llmClient?: LlmClient;
+    notifier?: DigestNotifier;
+    thresholds?: ScoreThresholds;
+    matchDeadlineMs: number;
+  },
+): Promise<{
+  eligibleCount: number;
+  shortlistedCount: number;
+  scoringFailures: number;
+  filterRejects?: Record<string, number>;
+}> {
+  let eligibleCount = 0;
+  let shortlistedCount = 0;
+  let scoringFailures = 0;
+  let filterRejects: Record<string, number> | undefined;
+
+  if (options.users.length === 0) {
+    return { eligibleCount, shortlistedCount, scoringFailures };
+  }
+
+  while (Date.now() < options.matchDeadlineMs) {
+    const batch = await listPendingMatchJobs(env.DB, PENDING_DRAIN_BATCH);
+    if (batch.length === 0) break;
+
+    for (const { user, profile } of options.users) {
+      const match = await runUserMatchAndNotify(env, {
+        userId: user.id,
+        profile,
+        telegramChatId: user.telegram_chat_id,
+        newJobs: batch,
+        runId: options.runId,
+        now: options.now,
+        dryRun: false,
+        sourcesChecked: options.sourcesChecked,
+        discoveredCount: options.discoveredCount,
+        logger: options.logger,
+        sendNoMatches: false,
+        ...(options.llmClient ? { llmClient: options.llmClient } : {}),
+        ...(options.notifier ? { notifier: options.notifier } : {}),
+        ...(options.thresholds ? { thresholds: options.thresholds } : {}),
+      });
+      eligibleCount += match.eligibleCount;
+      shortlistedCount += match.shortlistedCount;
+      scoringFailures += match.scoringFailures;
+      if (match.filterRejects) filterRejects = match.filterRejects;
+    }
+
+    await deletePendingMatches(
+      env.DB,
+      batch.map((job) => job.id),
+    );
+  }
+
+  return {
+    eligibleCount,
+    shortlistedCount,
+    scoringFailures,
+    ...(filterRejects ? { filterRejects } : {}),
+  };
+}
+
+/**
  * Orchestrates board ingest + per-user match/notify for one cron/manual tick.
+ * Work is split: leftover pending matches first, then a time-boxed ingest,
+ * then another drain. A killed tick leaves checkpoints (`last_polled_at`)
+ * and queued jobs for the next 15-minute cron.
  */
 export async function runDailyJobSearch(
   env: Env,
@@ -495,12 +588,13 @@ export async function runDailyJobSearch(
   };
 
   if (!dryRun) {
-    const locked = await acquireRunLock(env.DB, utcThreeHourSlotKey(now), crypto.randomUUID());
+    await failStaleRuns(env.DB, now);
+    const locked = await acquireIngestMutex(env.DB);
     if (!locked) {
       logger.warn({
         operation: "daily_job_search",
         status: "skipped",
-        reason: "run_already_exists",
+        reason: "ingest_mutex_held",
       });
       return { ...emptySummary, status: "skipped" };
     }
@@ -512,55 +606,122 @@ export async function runDailyJobSearch(
   });
   const runLogger = logger.child({ runId: run.id });
   const summary: RunSummary = { ...emptySummary, runId: run.id, status: "completed" };
+  const startedMs = Date.now();
+  const hardStopMs = startedMs + RUN_HARD_STOP_MS;
+  const ingestBudgetMs = options.ingestBudgetMs ?? DEFAULT_INGEST_BUDGET_MS;
+  const matchBudgetMs = options.matchBudgetMs ?? DEFAULT_MATCH_BUDGET_MS;
 
   try {
-    // Use default profile prefs for title prefilters during ingest (shared catalog).
     const seedProfile = await loadCandidateProfile(env);
+    const users = await loadActiveProfiles(env);
+    summary.usersNotified = users.length;
+
+    let totalEligible = 0;
+    let totalShortlisted = 0;
+    let totalScoringFailures = 0;
+    let filterRejects: Record<string, number> | undefined;
+    let fromCatalog = false;
+
+    if (!dryRun && users.length > 0) {
+      const leftover = await drainPendingMatches(env, {
+        users,
+        runId: run.id,
+        now,
+        sourcesChecked: 0,
+        discoveredCount: 0,
+        logger: runLogger,
+        matchDeadlineMs: Math.min(Date.now() + LEFTOVER_MATCH_BUDGET_MS, hardStopMs),
+        ...(options.llmClient ? { llmClient: options.llmClient } : {}),
+        ...(options.notifier ? { notifier: options.notifier } : {}),
+        ...(options.thresholds ? { thresholds: options.thresholds } : {}),
+      });
+      totalEligible += leftover.eligibleCount;
+      totalShortlisted += leftover.shortlistedCount;
+      totalScoringFailures += leftover.scoringFailures;
+      if (leftover.filterRejects) filterRejects = leftover.filterRejects;
+    }
+
     const ingest = await runBoardIngest(env, {
       ...options,
       dryRun,
       now,
       logger: runLogger,
       preferences: seedProfile.preferences,
+      ingestDeadlineMs: Math.min(Date.now() + ingestBudgetMs, hardStopMs),
     });
+    fromCatalog = ingest.fromCatalog;
     summary.discoveredCount = ingest.discoveredCount;
     summary.newCount = ingest.newJobs.length;
     summary.sourceFailures = ingest.sourceFailures;
     summary.boardsPolled = ingest.sourcesChecked;
 
-    const users = await loadActiveProfiles(env);
-    let totalEligible = 0;
-    let totalShortlisted = 0;
-    let totalScoringFailures = 0;
-    let filterRejects: Record<string, number> | undefined;
-
-    for (const { user, profile } of users) {
-      const match = await runUserMatchAndNotify(env, {
-        userId: user.id,
-        profile,
-        telegramChatId: user.telegram_chat_id,
-        newJobs: ingest.newJobs,
+    if (dryRun) {
+      for (const { user, profile } of users) {
+        const match = await runUserMatchAndNotify(env, {
+          userId: user.id,
+          profile,
+          telegramChatId: user.telegram_chat_id,
+          newJobs: ingest.newJobs,
+          runId: run.id,
+          now,
+          dryRun: true,
+          sourcesChecked: ingest.sourcesChecked,
+          discoveredCount: ingest.discoveredCount,
+          logger: runLogger,
+          ...(options.llmClient ? { llmClient: options.llmClient } : {}),
+          ...(options.notifier ? { notifier: options.notifier } : {}),
+          ...(options.thresholds ? { thresholds: options.thresholds } : {}),
+        });
+        totalEligible += match.eligibleCount;
+        totalShortlisted += match.shortlistedCount;
+        totalScoringFailures += match.scoringFailures;
+        if (match.filterRejects) filterRejects = match.filterRejects;
+      }
+    } else if (users.length > 0) {
+      const drained = await drainPendingMatches(env, {
+        users,
         runId: run.id,
         now,
-        dryRun,
         sourcesChecked: ingest.sourcesChecked,
         discoveredCount: ingest.discoveredCount,
         logger: runLogger,
+        matchDeadlineMs: Math.min(Date.now() + matchBudgetMs, hardStopMs),
         ...(options.llmClient ? { llmClient: options.llmClient } : {}),
         ...(options.notifier ? { notifier: options.notifier } : {}),
         ...(options.thresholds ? { thresholds: options.thresholds } : {}),
       });
-      totalEligible += match.eligibleCount;
-      totalShortlisted += match.shortlistedCount;
-      totalScoringFailures += match.scoringFailures;
-      if (match.filterRejects) filterRejects = match.filterRejects;
+      totalEligible += drained.eligibleCount;
+      totalShortlisted += drained.shortlistedCount;
+      totalScoringFailures += drained.scoringFailures;
+      if (drained.filterRejects) filterRejects = drained.filterRejects;
+
+      if (totalShortlisted === 0) {
+        for (const { user } of users) {
+          const userNotifier = resolveNotifier(
+            env,
+            options.notifier,
+            runLogger,
+            user.telegram_chat_id,
+          );
+          await userNotifier.sendNoMatchesNotice({
+            runId: run.id,
+            date: now,
+            sourcesChecked: ingest.sourcesChecked,
+            discoveredCount: ingest.discoveredCount,
+            newCount: ingest.newJobs.length,
+            eligibleCount: totalEligible,
+          });
+        }
+      }
     }
 
     summary.eligibleCount = totalEligible;
     summary.shortlistedCount = totalShortlisted;
     summary.scoringFailures = totalScoringFailures;
-    summary.usersNotified = users.length;
     if (dryRun && filterRejects) summary.filterRejects = filterRejects;
+    if (!dryRun) {
+      summary.pendingRemaining = await countPendingMatches(env.DB);
+    }
 
     if (dryRun) {
       runLogger.info({
@@ -589,7 +750,8 @@ export async function runDailyJobSearch(
       sourceFailures: summary.sourceFailures.length,
       boardsPolled: summary.boardsPolled,
       usersNotified: summary.usersNotified,
-      fromCatalog: ingest.fromCatalog,
+      pendingRemaining: summary.pendingRemaining,
+      fromCatalog,
     });
     return summary;
   } catch (error) {
@@ -605,5 +767,9 @@ export async function runDailyJobSearch(
       });
     }
     return summary;
+  } finally {
+    if (!dryRun) {
+      await releaseIngestMutex(env.DB);
+    }
   }
 }

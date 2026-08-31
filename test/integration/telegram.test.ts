@@ -104,6 +104,7 @@ beforeEach(async () => {
     "job_actions",
     "job_scores",
     "applications",
+    "pending_matches",
     "jobs",
     "telegram_messages",
     "audit_events",

@@ -6,7 +6,7 @@ const app = createApp();
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runDailyJobSearch(env, { triggerType: "cron" }));
+  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    await runDailyJobSearch(env, { triggerType: "cron" });
   },
 };

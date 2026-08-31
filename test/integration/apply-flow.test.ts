@@ -64,6 +64,7 @@ beforeEach(async () => {
     "user_profiles",
     "job_actions",
     "job_scores",
+    "pending_matches",
     "jobs",
     "audit_events",
   ]) {

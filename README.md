@@ -71,8 +71,8 @@ Set with `bunx wrangler secret put <NAME>` in production, or `.dev.vars` locally
 | --- | --- | --- |
 | `ENVIRONMENT` | — | `development` or `production` |
 | `APP_BASE_URL` | — | Public worker URL (webhook + OpenRouter headers) |
-| `BOARD_INGEST_BATCH_SIZE` | `48` | Boards polled per cron tick |
-| `BOARD_PRIORITY_CAP` | `16` | Max priority boards reserved each tick |
+| `BOARD_INGEST_BATCH_SIZE` | `16` | Boards polled per cron tick |
+| `BOARD_PRIORITY_CAP` | `6` | Max priority boards reserved each tick |
 | `SCORE_STRONG_MATCH_THRESHOLD` | `85` | Score for “strong match” |
 | `SCORE_REVIEW_THRESHOLD` | `60` | Minimum score to appear in the digest |
 | `SCORE_CAP_PER_USER` | `20` | Max LLM-scored jobs per user per cron tick |
@@ -112,14 +112,22 @@ and manually deactivated boards.
 
 ### Polling shard (each cron tick)
 
-1. Take up to `BOARD_PRIORITY_CAP` least-recently-polled **priority** boards
-2. Fill remaining `BOARD_INGEST_BATCH_SIZE` slots with least-recent **active**
-   boards (mostly standard)
-3. Upsert jobs; only **new fingerprints** go to filter → score → notify
-4. Notify each active `users` / `user_profiles` row
+Cron runs **every 15 minutes**. Each tick:
 
-At 8 ticks/day × ~32 standard slots ≈ **250 boards/day** → a 10k catalog rotates
-in roughly **5–6 weeks**. Promote high-yield boards to `priority`.
+1. Fails `running` rows older than 15 minutes (killed Workers)
+2. Drains leftover `pending_matches` (filter → score → notify)
+3. Polls up to `BOARD_INGEST_BATCH_SIZE` boards, interleaved by ATS provider,
+   in concurrent chunks of 4. Each chunk checkpoints `last_polled_at`
+4. Queues **new fingerprints** on `pending_matches` (no raw ATS JSON, no
+   per-user filter audit rows)
+5. Drains the queue again until the match budget (~5 min) or the 13-minute
+   hard stop
+
+If a tick hits the Worker wall clock, finished board chunks stay marked and
+unscored jobs remain queued for the next tick.
+
+At 96 ticks/day × ~10 standard slots ≈ **1.5k boards/day** → a 10k catalog
+rotates in about a week. Promote high-yield boards to `priority`.
 
 Add or update a board without redeploying:
 
@@ -213,8 +221,8 @@ Failed production runs send a safe Telegram error notice.
 
 - **Manual run**: `POST /api/admin/run-daily` (`{"dryRun": false}`). Default
   response is `202` (background). Pass `"sync": true` to wait for the summary.
-  Only one non-dry run per **3-hour UTC slot** (`run_locks`). To force a re-run
-  in the same slot, delete that slot’s row from `run_locks`.
+  Only one ingest at a time (`run_locks.date = ingest_mutex`). A lock older
+  than 15 minutes is stolen. To force a run, delete that mutex row.
 - **Check runs**: `GET /api/runs`
 - **Saved jobs**: Telegram `/saved`, or `GET /api/jobs?status=shortlisted`
 - **Upsert board**: `POST /api/admin/boards`

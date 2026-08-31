@@ -1,5 +1,15 @@
+import { chunkArray } from "../../shared/array";
 import { newId, nowIso } from "../client";
 import type { JobActionRow, JobRow, JobScoreRow, JobStatus, ScoreRecommendation } from "../schema";
+
+/** ATS HTML dumps are huge; scoring only needs the lead of the posting. */
+export const MAX_JOB_DESCRIPTION_CHARS = 12_000;
+const LOOKUP_CHUNK = 80;
+const WRITE_CHUNK = 20;
+
+export function clipJobDescription(text: string): string {
+  return text.length <= MAX_JOB_DESCRIPTION_CHARS ? text : text.slice(0, MAX_JOB_DESCRIPTION_CHARS);
+}
 
 export interface InsertJobInput {
   fingerprint: string;
@@ -43,7 +53,7 @@ export async function insertJob(db: D1Database, input: InsertJobInput): Promise<
       input.location ?? null,
       input.employmentType ?? null,
       input.workplaceType ?? null,
-      input.description,
+      clipJobDescription(input.description),
       input.applyUrl,
       input.canonicalUrl,
       input.salaryMin ?? null,
@@ -52,7 +62,7 @@ export async function insertJob(db: D1Database, input: InsertJobInput): Promise<
       input.postedAt ?? null,
       now,
       now,
-      input.rawPayload ?? null,
+      null,
     )
     .run();
   if (result.meta.changes === 0) return null;
@@ -97,6 +107,123 @@ export async function getJobByCanonicalUrl(
     .prepare("SELECT * FROM jobs WHERE canonical_url = ?")
     .bind(canonicalUrl)
     .first<JobRow>();
+}
+
+export async function listJobsByFingerprints(
+  db: D1Database,
+  fingerprints: readonly string[],
+): Promise<JobRow[]> {
+  if (fingerprints.length === 0) return [];
+  const out: JobRow[] = [];
+  for (const chunk of chunkArray([...fingerprints], LOOKUP_CHUNK)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await db
+      .prepare(`SELECT * FROM jobs WHERE fingerprint IN (${placeholders})`)
+      .bind(...chunk)
+      .all<JobRow>();
+    out.push(...result.results);
+  }
+  return out;
+}
+
+export async function listJobsByCanonicalUrls(
+  db: D1Database,
+  urls: readonly string[],
+): Promise<JobRow[]> {
+  if (urls.length === 0) return [];
+  const out: JobRow[] = [];
+  for (const chunk of chunkArray([...urls], LOOKUP_CHUNK)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await db
+      .prepare(`SELECT * FROM jobs WHERE canonical_url IN (${placeholders})`)
+      .bind(...chunk)
+      .all<JobRow>();
+    out.push(...result.results);
+  }
+  return out;
+}
+
+/**
+ * Insert only jobs that are new by fingerprint or canonical URL. Existing rows
+ * get last_seen_at touched. New rows are queued on pending_matches in the same
+ * batch so a killed tick cannot persist a job without enqueueing it.
+ */
+export async function persistDiscoveredJobs(
+  db: D1Database,
+  inputs: InsertJobInput[],
+): Promise<{ newJobs: JobRow[]; existingCount: number }> {
+  if (inputs.length === 0) return { newJobs: [], existingCount: 0 };
+
+  const fingerprints = inputs.map((input) => input.fingerprint);
+  const byFingerprint = await listJobsByFingerprints(db, fingerprints);
+  const seenFingerprints = new Set(byFingerprint.map((job) => job.fingerprint));
+  const remaining = inputs.filter((input) => !seenFingerprints.has(input.fingerprint));
+
+  const urls = remaining.map((input) => input.canonicalUrl);
+  const byUrl = await listJobsByCanonicalUrls(db, urls);
+  const seenUrls = new Set(byUrl.map((job) => job.canonical_url));
+  const toInsert = remaining.filter((input) => !seenUrls.has(input.canonicalUrl));
+
+  const touchIds = [...new Set([...byFingerprint, ...byUrl].map((job) => job.id))];
+  const seenAt = nowIso(inputs[0]?.now);
+  for (const chunk of chunkArray(touchIds, WRITE_CHUNK)) {
+    await db.batch(
+      chunk.map((id) =>
+        db.prepare("UPDATE jobs SET last_seen_at = ? WHERE id = ?").bind(seenAt, id),
+      ),
+    );
+  }
+
+  const newJobs: JobRow[] = [];
+  for (const chunk of chunkArray(toInsert, WRITE_CHUNK)) {
+    const statements = chunk.flatMap((input) => {
+      const id = newId();
+      const now = nowIso(input.now);
+      return [
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO jobs (
+               id, fingerprint, source, source_job_id, company, title, location,
+               employment_type, workplace_type, description, apply_url, canonical_url,
+               salary_min, salary_max, salary_currency, posted_at, discovered_at,
+               last_seen_at, raw_payload, status
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered')`,
+          )
+          .bind(
+            id,
+            input.fingerprint,
+            input.source,
+            input.sourceJobId ?? null,
+            input.company,
+            input.title,
+            input.location ?? null,
+            input.employmentType ?? null,
+            input.workplaceType ?? null,
+            clipJobDescription(input.description),
+            input.applyUrl,
+            input.canonicalUrl,
+            input.salaryMin ?? null,
+            input.salaryMax ?? null,
+            input.salaryCurrency ?? null,
+            input.postedAt ?? null,
+            now,
+            now,
+            null,
+          ),
+        db
+          .prepare("INSERT OR IGNORE INTO pending_matches (job_id, created_at) VALUES (?, ?)")
+          .bind(id, now),
+      ];
+    });
+    await db.batch(statements);
+    const inserted = await listJobsByFingerprints(
+      db,
+      chunk.map((input) => input.fingerprint),
+    );
+    newJobs.push(...inserted);
+  }
+
+  return { newJobs, existingCount: inputs.length - newJobs.length };
 }
 
 export async function upsertDiscoveredJob(

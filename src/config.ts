@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type CandidateProfile, parseCandidateProfile } from "./candidate/profile";
 import {
+  type AtsBoardRow,
   boardToSourceEntry,
   countActiveAtsBoards,
   DEFAULT_BOARD_BATCH_SIZE,
@@ -126,7 +127,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 export async function loadSourcesForIngest(
   env: Env,
   options: LoadSourcesOptions = {},
-): Promise<{ entries: SourceEntry[]; boardIds: string[]; fromCatalog: boolean }> {
+): Promise<{ entries: SourceEntry[]; boards: AtsBoardRow[]; fromCatalog: boolean }> {
   const catalogCount = options.preferEnvSources ? 0 : await countActiveAtsBoards(env.DB);
 
   if (catalogCount > 0) {
@@ -136,14 +137,13 @@ export async function loadSourcesForIngest(
       parsePositiveInt(env.BOARD_INGEST_BATCH_SIZE, DEFAULT_BOARD_BATCH_SIZE);
     const priorityCap =
       options.priorityCap ?? parsePositiveInt(env.BOARD_PRIORITY_CAP, DEFAULT_PRIORITY_CAP);
-    const boards = await selectBoardsForIngest(env.DB, { batchSize, priorityCap });
-    let entries = boards.map(boardToSourceEntry);
+    let boards = await selectBoardsForIngest(env.DB, { batchSize, priorityCap });
     if (options.sourceNames?.length) {
-      entries = entries.filter((entry) => options.sourceNames?.includes(entry.source));
+      boards = boards.filter((board) => options.sourceNames?.includes(board.provider));
     }
     return {
-      entries,
-      boardIds: boards.map((b) => b.id),
+      entries: boards.map(boardToSourceEntry),
+      boards,
       fromCatalog: true,
     };
   }
@@ -152,7 +152,7 @@ export async function loadSourcesForIngest(
   if (options.sourceNames?.length) {
     entries = entries.filter((entry) => options.sourceNames?.includes(entry.source));
   }
-  return { entries, boardIds: [], fromCatalog: false };
+  return { entries, boards: [], fromCatalog: false };
 }
 
 async function readLegacyProfile(env: Env): Promise<CandidateProfile | null> {

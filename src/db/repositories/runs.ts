@@ -77,3 +77,50 @@ export async function failRun(
 export async function setRunStatus(db: D1Database, id: string, status: RunStatus): Promise<void> {
   await db.prepare("UPDATE runs SET status = ? WHERE id = ?").bind(status, id).run();
 }
+
+/** Wall-clock age after which a `running` row is treated as a killed cron tick. */
+export const STALE_RUN_MS = 15 * 60 * 1000;
+export const INGEST_MUTEX_KEY = "ingest_mutex";
+export const INGEST_MUTEX_STALE_MS = 15 * 60 * 1000;
+
+export async function failStaleRuns(
+  db: D1Database,
+  now: Date,
+  maxAgeMs = STALE_RUN_MS,
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - maxAgeMs).toISOString();
+  const result = await db
+    .prepare(
+      `UPDATE runs
+       SET status = 'failed', completed_at = ?, error = 'stale_running'
+       WHERE status = 'running' AND started_at < ?`,
+    )
+    .bind(nowIso(now), cutoff)
+    .run();
+  return result.meta.changes;
+}
+
+/**
+ * Single-row mutex so overlapping cron ticks do not double-poll. A lock older
+ * than 15 minutes is stolen (previous tick was killed by the Worker limit).
+ */
+export async function acquireIngestMutex(db: D1Database): Promise<boolean> {
+  const existing = await db
+    .prepare("SELECT created_at FROM run_locks WHERE date = ?")
+    .bind(INGEST_MUTEX_KEY)
+    .first<{ created_at: string }>();
+  if (existing) {
+    const age = Date.now() - Date.parse(existing.created_at);
+    if (Number.isFinite(age) && age < INGEST_MUTEX_STALE_MS) return false;
+    await db.prepare("DELETE FROM run_locks WHERE date = ?").bind(INGEST_MUTEX_KEY).run();
+  }
+  const result = await db
+    .prepare("INSERT OR IGNORE INTO run_locks (date, run_id, created_at) VALUES (?, ?, ?)")
+    .bind(INGEST_MUTEX_KEY, crypto.randomUUID(), new Date().toISOString())
+    .run();
+  return result.meta.changes === 1;
+}
+
+export async function releaseIngestMutex(db: D1Database): Promise<void> {
+  await db.prepare("DELETE FROM run_locks WHERE date = ?").bind(INGEST_MUTEX_KEY).run();
+}

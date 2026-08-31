@@ -195,3 +195,8 @@ export interface UserJobStateRow {
   status: string;
   updated_at: string;
 }
+
+export interface PendingMatchRow {
+  job_id: string;
+  created_at: string;
+}

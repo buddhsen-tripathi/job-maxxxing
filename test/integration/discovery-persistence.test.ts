@@ -6,6 +6,7 @@ import { must } from "../helpers";
 const db = env.DB;
 
 beforeEach(async () => {
+  await db.prepare("DELETE FROM pending_matches").run();
   await db.prepare("DELETE FROM jobs").run();
 });
 

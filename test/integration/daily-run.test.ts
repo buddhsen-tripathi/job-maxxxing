@@ -1,9 +1,13 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import candidateProfileExample from "../../candidate-profile.example.json";
-import { listJobs } from "../../src/db/repositories/jobs";
+import { insertJob, listJobs } from "../../src/db/repositories/jobs";
 import { listAuditEvents } from "../../src/db/repositories/meta";
-import { getRun } from "../../src/db/repositories/runs";
+import {
+  countPendingMatches,
+  enqueuePendingMatches,
+} from "../../src/db/repositories/pending-matches";
+import { createRun, getRun, INGEST_MUTEX_KEY } from "../../src/db/repositories/runs";
 import { setUserActive } from "../../src/db/repositories/users";
 import { createMockLlmClient } from "../../src/llm/mock";
 import greenhouseFixture from "../../src/sources/fixtures/greenhouse-board.json";
@@ -90,6 +94,7 @@ beforeEach(async () => {
     "job_actions",
     "job_scores",
     "applications",
+    "pending_matches",
     "jobs",
     "runs",
     "run_locks",
@@ -132,21 +137,36 @@ describe("runDailyJobSearch", () => {
     const run = must(await getRun(db, must(summary.runId)));
     expect(run.status).toBe("completed");
     expect(run.new_count).toBe(4);
+    expect(await countPendingMatches(db)).toBe(0);
+    const systemActions = await db
+      .prepare("SELECT COUNT(*) AS n FROM job_actions WHERE source = 'system'")
+      .first<{ n: number }>();
+    expect(systemActions?.n).toBe(0);
   });
 
-  it("prevents a second run in the same 3-hour UTC slot (run lock)", async () => {
-    const t1 = createTestNotifier();
-    const first = await runDailyJobSearch(env, baseOptions(t1));
-    expect(first.status).toBe("completed");
+  it("skips when the ingest mutex is held", async () => {
+    await db
+      .prepare("INSERT INTO run_locks (date, run_id, created_at) VALUES (?, ?, ?)")
+      .bind(INGEST_MUTEX_KEY, "held", new Date().toISOString())
+      .run();
 
-    const t2 = createTestNotifier();
-    const second = await runDailyJobSearch(env, baseOptions(t2));
-    expect(second.status).toBe("skipped");
-    expect(t2.digests).toHaveLength(0);
-    expect(await listJobs(db)).toHaveLength(4);
+    const t = createTestNotifier();
+    const summary = await runDailyJobSearch(env, baseOptions(t));
+    expect(summary.status).toBe("skipped");
+    expect(t.digests).toHaveLength(0);
+    expect(await listJobs(db)).toHaveLength(0);
   });
 
-  it("allows a run in the next 3-hour UTC slot", async () => {
+  it("allows another run after the previous one completes", async () => {
+    await runDailyJobSearch(env, baseOptions(createTestNotifier()));
+    const t = createTestNotifier();
+    const summary = await runDailyJobSearch(env, baseOptions(t));
+    expect(summary.status).toBe("completed");
+    expect(summary.newCount).toBe(0);
+    expect(t.noMatches).toHaveLength(1);
+  });
+
+  it("allows a run in a later UTC hour", async () => {
     await runDailyJobSearch(env, baseOptions(createTestNotifier()));
     const t = createTestNotifier();
     const summary = await runDailyJobSearch(env, {
@@ -209,6 +229,47 @@ describe("runDailyJobSearch", () => {
     expect(summary.usersNotified).toBe(0);
     expect(t.digests).toHaveLength(0);
     expect(t.noMatches).toHaveLength(0);
+  });
+
+  it("fails stale running ticks before starting a new one", async () => {
+    const stale = await createRun(db, {
+      triggerType: "cron",
+      now: new Date(NOW.getTime() - 20 * 60 * 1000),
+    });
+    const summary = await runDailyJobSearch(env, baseOptions(createTestNotifier()));
+    expect(summary.status).toBe("completed");
+    expect((await getRun(db, stale.id))?.status).toBe("failed");
+    expect((await getRun(db, stale.id))?.error).toBe("stale_running");
+  });
+
+  it("drains queued pending matches even when ingest is skipped", async () => {
+    const job = must(
+      await insertJob(db, {
+        fingerprint: "fp-pending-drain",
+        source: "greenhouse",
+        company: "ExampleCo",
+        title: "Backend Software Engineer",
+        location: "New York, NY",
+        employmentType: "full_time",
+        workplaceType: "remote",
+        description: "Build APIs and distributed systems in TypeScript.",
+        applyUrl: "https://boards.greenhouse.io/exampleco/jobs/9001",
+        canonicalUrl: "https://boards.greenhouse.io/exampleco/jobs/9001",
+        now: NOW,
+      }),
+    );
+    await enqueuePendingMatches(db, [job.id], NOW);
+    env.SOURCES_JSON = "[]";
+
+    const t = createTestNotifier();
+    const summary = await runDailyJobSearch(env, {
+      ...baseOptions(t),
+      ingestBudgetMs: 0,
+    });
+    expect(summary.status).toBe("completed");
+    expect(summary.discoveredCount).toBe(0);
+    expect(t.digests.length + t.noMatches.length).toBeGreaterThanOrEqual(1);
+    expect(await countPendingMatches(db)).toBe(0);
   });
 });
 

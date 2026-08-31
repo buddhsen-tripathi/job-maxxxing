@@ -22,8 +22,8 @@ export interface Env {
   /** Max jobs LLM-scored per user per cron tick (default 20). */
   SCORE_CAP_PER_USER?: string;
 
-  /** Boards polled per cron tick (default 48). */
+  /** Boards polled per cron tick (default 16). */
   BOARD_INGEST_BATCH_SIZE?: string;
-  /** Max priority boards reserved each tick (default 16). */
+  /** Max priority boards reserved each tick (default 6). */
   BOARD_PRIORITY_CAP?: string;
 }

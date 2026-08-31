@@ -1,11 +1,12 @@
 {
-  // Cron every 3 hours UTC: 00:00, 03:00, 06:00, …, 21:00 (8 runs/day).
+  // Cron every 15 minutes. Each tick polls a small board shard and must finish
+  // under the ~15 minute Worker scheduled-handler limit.
   "name": "job-maxxing",
   "main": "src/index.ts",
   "compatibility_date": "2025-07-12",
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
-    "crons": ["0 */3 * * *"]
+    "crons": ["*/15 * * * *"]
   },
   "d1_databases": [
     {
@@ -24,8 +25,8 @@
   "vars": {
     "ENVIRONMENT": "production",
     // Set APP_BASE_URL outside git (Dashboard vars or `wrangler secret put APP_BASE_URL`).
-    "BOARD_INGEST_BATCH_SIZE": "48",
-    "BOARD_PRIORITY_CAP": "16"
+    "BOARD_INGEST_BATCH_SIZE": "16",
+    "BOARD_PRIORITY_CAP": "6"
   },
   "observability": {
     "enabled": true

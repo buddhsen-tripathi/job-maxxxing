@@ -35,7 +35,7 @@ export function createAdapterForEntry(entry: SourceEntry): JobSourceAdapter {
   }
 }
 
-const SOURCE_CONCURRENCY = 3;
+const SOURCE_CONCURRENCY = 4;
 
 export async function discoverFromSources(
   entries: readonly SourceEntry[],
