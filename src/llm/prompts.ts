@@ -47,7 +47,7 @@ Location: ${job.location ?? "unknown"}
 Workplace type: ${job.workplace_type ?? "unknown"}
 Employment type: ${job.employment_type ?? "unknown"}
 Description:
-${job.description.slice(0, 8000)}
+${job.description}
 
 CANDIDATE
 Current title: ${profile.experience.currentTitle ?? "unknown"}

@@ -118,8 +118,8 @@ Cron runs **every 15 minutes**. Each tick:
 2. Drains leftover `pending_matches` (filter → score → notify)
 3. Polls up to `BOARD_INGEST_BATCH_SIZE` boards, interleaved by ATS provider,
    in concurrent chunks of 4. Each chunk checkpoints `last_polled_at`
-4. Queues **new fingerprints** on `pending_matches` (no raw ATS JSON, no
-   per-user filter audit rows)
+4. Queues **new fingerprints** on `pending_matches` (no raw ATS JSON; description
+   stores extracted **requirements** only — not about-us / benefits / EEO)
 5. Drains the queue again until the match budget (~5 min) or the 13-minute
    hard stop
 

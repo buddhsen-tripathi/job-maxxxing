@@ -1,15 +1,13 @@
+import { extractJobRequirements } from "../../jobs/requirements";
 import { chunkArray } from "../../shared/array";
 import { newId, nowIso } from "../client";
 import type { JobActionRow, JobRow, JobScoreRow, JobStatus, ScoreRecommendation } from "../schema";
 
-/** ATS HTML dumps are huge; scoring only needs the lead of the posting. */
-export const MAX_JOB_DESCRIPTION_CHARS = 12_000;
 const LOOKUP_CHUNK = 80;
 const WRITE_CHUNK = 20;
-
-export function clipJobDescription(text: string): string {
-  return text.length <= MAX_JOB_DESCRIPTION_CHARS ? text : text.slice(0, MAX_JOB_DESCRIPTION_CHARS);
-}
+/** Rows longer than this still look like a full posting and get compacted. */
+const FAT_DESCRIPTION_CHARS = 2_000;
+const COMPACT_BATCH = 250;
 
 export interface InsertJobInput {
   fingerprint: string;
@@ -53,7 +51,7 @@ export async function insertJob(db: D1Database, input: InsertJobInput): Promise<
       input.location ?? null,
       input.employmentType ?? null,
       input.workplaceType ?? null,
-      clipJobDescription(input.description),
+      extractJobRequirements(input.description),
       input.applyUrl,
       input.canonicalUrl,
       input.salaryMin ?? null,
@@ -145,8 +143,8 @@ export async function listJobsByCanonicalUrls(
 
 /**
  * Insert only jobs that are new by fingerprint or canonical URL. Existing rows
- * get last_seen_at touched. New rows are queued on pending_matches in the same
- * batch so a killed tick cannot persist a job without enqueueing it.
+ * get last_seen_at touched and description rewritten to extracted requirements.
+ * New rows are queued on pending_matches in the same batch.
  */
 export async function persistDiscoveredJobs(
   db: D1Database,
@@ -164,14 +162,26 @@ export async function persistDiscoveredJobs(
   const seenUrls = new Set(byUrl.map((job) => job.canonical_url));
   const toInsert = remaining.filter((input) => !seenUrls.has(input.canonicalUrl));
 
-  const touchIds = [...new Set([...byFingerprint, ...byUrl].map((job) => job.id))];
+  const extractedByFingerprint = new Map(
+    inputs.map((input) => [input.fingerprint, extractJobRequirements(input.description)]),
+  );
+  const extractedByUrl = new Map(
+    inputs.map((input) => [input.canonicalUrl, extractJobRequirements(input.description)]),
+  );
   const seenAt = nowIso(inputs[0]?.now);
-  for (const chunk of chunkArray(touchIds, WRITE_CHUNK)) {
-    await db.batch(
-      chunk.map((id) =>
-        db.prepare("UPDATE jobs SET last_seen_at = ? WHERE id = ?").bind(seenAt, id),
-      ),
-    );
+  const existingById = new Map<string, JobRow>();
+  for (const job of [...byFingerprint, ...byUrl]) existingById.set(job.id, job);
+  const touchStatements = [...existingById.values()].map((job) => {
+    const description =
+      extractedByFingerprint.get(job.fingerprint) ??
+      extractedByUrl.get(job.canonical_url) ??
+      extractJobRequirements(job.description);
+    return db
+      .prepare("UPDATE jobs SET last_seen_at = ?, description = ? WHERE id = ?")
+      .bind(seenAt, description, job.id);
+  });
+  for (const chunk of chunkArray(touchStatements, WRITE_CHUNK)) {
+    await db.batch(chunk);
   }
 
   const newJobs: JobRow[] = [];
@@ -199,7 +209,7 @@ export async function persistDiscoveredJobs(
             input.location ?? null,
             input.employmentType ?? null,
             input.workplaceType ?? null,
-            clipJobDescription(input.description),
+            extractJobRequirements(input.description),
             input.applyUrl,
             input.canonicalUrl,
             input.salaryMin ?? null,
@@ -234,8 +244,13 @@ export async function upsertDiscoveredJob(
     (await getJobByFingerprint(db, input.fingerprint)) ??
     (input.canonicalUrl ? await getJobByCanonicalUrl(db, input.canonicalUrl) : null);
   if (existing) {
-    await touchJobLastSeen(db, existing.id, input.now);
-    return { job: existing, isNew: false };
+    const description = extractJobRequirements(input.description);
+    await db
+      .prepare("UPDATE jobs SET last_seen_at = ?, description = ? WHERE id = ?")
+      .bind(nowIso(input.now), description, existing.id)
+      .run();
+    const updated = await getJobById(db, existing.id);
+    return { job: updated ?? existing, isNew: false };
   }
   const job = await insertJob(db, input);
   if (!job) {
@@ -256,6 +271,38 @@ export async function touchJobLastSeen(
 
 export async function setJobStatus(db: D1Database, id: string, status: JobStatus): Promise<void> {
   await db.prepare("UPDATE jobs SET status = ? WHERE id = ?").bind(status, id).run();
+}
+
+/** Rewrite oversized stored postings down to requirements. Used to shrink legacy rows. */
+export async function compactFatJobDescriptions(
+  db: D1Database,
+  limit = COMPACT_BATCH,
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `SELECT id, description FROM jobs
+       WHERE length(description) > ?
+       ORDER BY length(description) DESC
+       LIMIT ?`,
+    )
+    .bind(FAT_DESCRIPTION_CHARS, limit)
+    .all<{ id: string; description: string }>();
+
+  const statements: D1PreparedStatement[] = [];
+  for (const row of result.results) {
+    const next = extractJobRequirements(row.description);
+    if (next.length < row.description.length) {
+      statements.push(
+        db.prepare("UPDATE jobs SET description = ? WHERE id = ?").bind(next, row.id),
+      );
+    }
+  }
+  let updated = 0;
+  for (const chunk of chunkArray(statements, WRITE_CHUNK)) {
+    await db.batch(chunk);
+    updated += chunk.length;
+  }
+  return updated;
 }
 
 export interface InsertScoreInput {

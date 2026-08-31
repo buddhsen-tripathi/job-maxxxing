@@ -6,6 +6,7 @@ import {
   updateApplication,
 } from "../../src/db/repositories/applications";
 import {
+  compactFatJobDescriptions,
   getJobByFingerprint,
   getJobById,
   getLatestScoreForJob,
@@ -119,6 +120,45 @@ describe("jobs repository", () => {
     const shortlisted = await listJobs(db, { status: "shortlisted" });
     expect(shortlisted).toHaveLength(1);
     expect(shortlisted[0]?.id).toBe(a.id);
+  });
+
+  it("stores extracted requirements instead of the full posting", async () => {
+    const fluff = `${"We are a generational company. ".repeat(80)}Requirements\n- 5+ years TypeScript\nBenefits\nUnlimited PTO and 401k.`;
+    const job = must(
+      await insertJob(
+        db,
+        jobInput({
+          fingerprint: "fp-req",
+          description: fluff,
+        }),
+      ),
+    );
+    expect(job.description).toContain("5+ years TypeScript");
+    expect(job.description).not.toContain("generational company");
+    expect(job.description.length).toBeLessThan(fluff.length);
+  });
+
+  it("compacts oversized descriptions already in the database", async () => {
+    const fluff = `${"About Us We ship rockets and change the world. ".repeat(50)}Requirements\n- Go or TypeScript\nBenefits ${"unlimited pto ".repeat(40)}`;
+    await db
+      .prepare(
+        `INSERT INTO jobs (
+           id, fingerprint, source, source_job_id, company, title, location,
+           employment_type, workplace_type, description, apply_url, canonical_url,
+           salary_min, salary_max, salary_currency, posted_at, discovered_at,
+           last_seen_at, raw_payload, status
+         ) VALUES (?, ?, 'greenhouse', null, 'Co', 'Eng', null, null, 'remote', ?,
+           'https://example.com/j', 'https://example.com/j', null, null, null, null, ?, ?, null, 'discovered')`,
+      )
+      .bind("job-fat", "fp-fat", fluff, "2026-07-31T00:00:00.000Z", "2026-07-31T00:00:00.000Z")
+      .run();
+
+    const updated = await compactFatJobDescriptions(db, 10);
+    expect(updated).toBe(1);
+    const stored = must(await getJobById(db, "job-fat"));
+    expect(stored.description).toContain("Go or TypeScript");
+    expect(stored.description.length).toBeLessThan(fluff.length);
+    expect(stored.description).not.toContain("unlimited pto");
   });
 });
 

@@ -9,7 +9,7 @@ import {
 } from "../config";
 import { markBoardPolled } from "../db/repositories/boards";
 import {
-  clipJobDescription,
+  compactFatJobDescriptions,
   getJobByFingerprint,
   getLatestScoreForJob,
   insertJobScore,
@@ -35,6 +35,7 @@ import type { JobRow } from "../db/schema";
 import type { Env } from "../env";
 import { discoverFromSources, type SourceFailure } from "../jobs/discover";
 import { applyHardFilters } from "../jobs/filters";
+import { extractJobRequirements } from "../jobs/requirements";
 import { chooseDigestJobs, type ScoredJob, type ScoreThresholds, scoreJobs } from "../jobs/scoring";
 import type { LlmClient } from "../llm/client";
 import { createMockLlmClient } from "../llm/mock";
@@ -210,7 +211,7 @@ function jobToRow(
     location: job.location ?? null,
     employment_type: job.employmentType ?? null,
     workplace_type: job.workplaceType,
-    description: clipJobDescription(job.description),
+    description: extractJobRequirements(job.description),
     apply_url: job.applyUrl,
     canonical_url: job.canonicalUrl,
     salary_min: job.salary?.min ?? null,
@@ -621,6 +622,17 @@ export async function runDailyJobSearch(
     let totalScoringFailures = 0;
     let filterRejects: Record<string, number> | undefined;
     let fromCatalog = false;
+
+    if (!dryRun) {
+      const compacted = await compactFatJobDescriptions(env.DB);
+      if (compacted > 0) {
+        runLogger.info({
+          operation: "daily_job_search",
+          status: "compacted_descriptions",
+          count: compacted,
+        });
+      }
+    }
 
     if (!dryRun && users.length > 0) {
       const leftover = await drainPendingMatches(env, {
