@@ -51,9 +51,13 @@ const INGEST_CHUNK_SIZE = 4;
 /** Leave headroom under the ~15 minute Worker scheduled limit. */
 export const DEFAULT_INGEST_BUDGET_MS = 8 * 60 * 1000;
 export const DEFAULT_MATCH_BUDGET_MS = 5 * 60 * 1000;
-const LEFTOVER_MATCH_BUDGET_MS = 2 * 60 * 1000;
+const LEFTOVER_MATCH_BUDGET_MS = 90 * 1000;
 const RUN_HARD_STOP_MS = 13 * 60 * 1000;
-const PENDING_DRAIN_BATCH = 40;
+/** Small slices so OpenRouter latency cannot blow the cron wall clock. */
+const PENDING_DRAIN_BATCH = 4;
+const LEFTOVER_SCORE_CAP = 4;
+const MATCH_SCORE_CAP = 8;
+const DRAIN_HEADROOM_MS = 15_000;
 
 export interface DigestInput {
   runId: string;
@@ -389,6 +393,7 @@ export async function runUserMatchAndNotify(
     thresholds?: ScoreThresholds;
     /** When false, skip the empty-digest Telegram notice (caller may send one later). */
     sendNoMatches?: boolean;
+    scoreCap?: number;
   },
 ): Promise<UserMatchResult> {
   const llm = resolveLlmClient(env, options.llmClient, options.logger);
@@ -398,7 +403,10 @@ export async function runUserMatchAndNotify(
   const eligible: JobRow[] = [];
   const filterRejects: Record<string, number> = {};
   /** Cap LLM calls per user per tick to control OpenRouter spend for public bots. */
-  const scoreCap = Math.max(1, Number(env.SCORE_CAP_PER_USER ?? "20") || 20);
+  const scoreCap = Math.max(
+    1,
+    options.scoreCap ?? (Number(env.SCORE_CAP_PER_USER ?? "20") || 20),
+  );
 
   for (const row of options.newJobs) {
     if (!options.dryRun) {
@@ -502,6 +510,8 @@ async function drainPendingMatches(
     notifier?: DigestNotifier;
     thresholds?: ScoreThresholds;
     matchDeadlineMs: number;
+    scoreCap: number;
+    maxBatches?: number;
   },
 ): Promise<{
   eligibleCount: number;
@@ -518,11 +528,15 @@ async function drainPendingMatches(
     return { eligibleCount, shortlistedCount, scoringFailures };
   }
 
-  while (Date.now() < options.matchDeadlineMs) {
+  let batches = 0;
+  while (Date.now() + DRAIN_HEADROOM_MS < options.matchDeadlineMs) {
+    if (options.maxBatches !== undefined && batches >= options.maxBatches) break;
     const batch = await listPendingMatchJobs(env.DB, PENDING_DRAIN_BATCH);
     if (batch.length === 0) break;
+    batches += 1;
 
     for (const { user, profile } of options.users) {
+      if (Date.now() + DRAIN_HEADROOM_MS >= options.matchDeadlineMs) break;
       const match = await runUserMatchAndNotify(env, {
         userId: user.id,
         profile,
@@ -535,6 +549,7 @@ async function drainPendingMatches(
         discoveredCount: options.discoveredCount,
         logger: options.logger,
         sendNoMatches: false,
+        scoreCap: options.scoreCap,
         ...(options.llmClient ? { llmClient: options.llmClient } : {}),
         ...(options.notifier ? { notifier: options.notifier } : {}),
         ...(options.thresholds ? { thresholds: options.thresholds } : {}),
@@ -623,17 +638,6 @@ export async function runDailyJobSearch(
     let filterRejects: Record<string, number> | undefined;
     let fromCatalog = false;
 
-    if (!dryRun) {
-      const compacted = await compactFatJobDescriptions(env.DB);
-      if (compacted > 0) {
-        runLogger.info({
-          operation: "daily_job_search",
-          status: "compacted_descriptions",
-          count: compacted,
-        });
-      }
-    }
-
     if (!dryRun && users.length > 0) {
       const leftover = await drainPendingMatches(env, {
         users,
@@ -643,6 +647,8 @@ export async function runDailyJobSearch(
         discoveredCount: 0,
         logger: runLogger,
         matchDeadlineMs: Math.min(Date.now() + LEFTOVER_MATCH_BUDGET_MS, hardStopMs),
+        scoreCap: LEFTOVER_SCORE_CAP,
+        maxBatches: 1,
         ...(options.llmClient ? { llmClient: options.llmClient } : {}),
         ...(options.notifier ? { notifier: options.notifier } : {}),
         ...(options.thresholds ? { thresholds: options.thresholds } : {}),
@@ -698,6 +704,7 @@ export async function runDailyJobSearch(
         discoveredCount: ingest.discoveredCount,
         logger: runLogger,
         matchDeadlineMs: Math.min(Date.now() + matchBudgetMs, hardStopMs),
+        scoreCap: MATCH_SCORE_CAP,
         ...(options.llmClient ? { llmClient: options.llmClient } : {}),
         ...(options.notifier ? { notifier: options.notifier } : {}),
         ...(options.thresholds ? { thresholds: options.thresholds } : {}),
@@ -733,6 +740,16 @@ export async function runDailyJobSearch(
     if (dryRun && filterRejects) summary.filterRejects = filterRejects;
     if (!dryRun) {
       summary.pendingRemaining = await countPendingMatches(env.DB);
+      if (Date.now() + 20_000 < hardStopMs) {
+        const compacted = await compactFatJobDescriptions(env.DB);
+        if (compacted > 0) {
+          runLogger.info({
+            operation: "daily_job_search",
+            status: "compacted_descriptions",
+            count: compacted,
+          });
+        }
+      }
     }
 
     if (dryRun) {

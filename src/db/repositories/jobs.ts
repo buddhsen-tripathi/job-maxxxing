@@ -7,7 +7,7 @@ const LOOKUP_CHUNK = 80;
 const WRITE_CHUNK = 20;
 /** Rows longer than this still look like a full posting and get compacted. */
 const FAT_DESCRIPTION_CHARS = 2_000;
-const COMPACT_BATCH = 250;
+const COMPACT_BATCH = 40;
 
 export interface InsertJobInput {
   fingerprint: string;
@@ -282,7 +282,6 @@ export async function compactFatJobDescriptions(
     .prepare(
       `SELECT id, description FROM jobs
        WHERE length(description) > ?
-       ORDER BY length(description) DESC
        LIMIT ?`,
     )
     .bind(FAT_DESCRIPTION_CHARS, limit)
